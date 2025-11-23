@@ -1,0 +1,205 @@
+#include <rclcpp/rclcpp.hpp>
+#include <nav_msgs/msg/odometry.hpp>
+#include <ackermann_msgs/msg/ackermann_drive_stamped.hpp>
+#include <visualization_msgs/msg/marker.hpp>
+#include <geometry_msgs/msg/point.hpp>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Matrix3x3.h>
+
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <cmath>
+#include <sstream>
+#include <string>
+
+using namespace std;
+
+// 데이터 구조체
+struct Waypoint {
+    double x;
+    double y;
+    double v; // 속도
+};
+
+class PurePursuit : public rclcpp::Node {
+public:
+    PurePursuit() : Node("pure_pursuit_node") {
+        // --- 파라미터 설정 ---
+        this->declare_parameter("csv_path", "raceline_with_speed.csv");
+        this->declare_parameter("lookahead_min", 1.0);  // 최소 전방 주시 거리
+        this->declare_parameter("lookahead_gain", 0.3); // 속도 비례 주시 거리 (Lookahead = min + v * gain)
+        this->declare_parameter("wheelbase", 0.33);     // 차량 휠베이스 (F1TENTH 기준)
+
+        string csv_path = this->get_parameter("csv_path").as_string();
+        lookahead_min_ = this->get_parameter("lookahead_min").as_double();
+        lookahead_gain_ = this->get_parameter("lookahead_gain").as_double();
+        wheelbase_ = this->get_parameter("wheelbase").as_double();
+
+        // 1. CSV 파일 로드
+        if (!load_waypoints(csv_path)) {
+            RCLCPP_ERROR(this->get_logger(), "Failed to load CSV file!");
+            rclcpp::shutdown();
+        }
+
+        // 2. Publisher & Subscriber
+        // F1TENTH 시뮬레이터는 '/drive' 토픽을 사용
+        drive_pub_ = this->create_publisher<ackermann_msgs::msg::AckermannDriveStamped>("/drive", 10);
+        
+        // 디버깅용 마커 (Rviz에서 목표점 확인)
+        vis_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/pure_pursuit_marker", 10);
+
+        // 오도메트리 구독
+        odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+            "/ego_racecar/odom", 10, std::bind(&PurePursuit::odom_callback, this, std::placeholders::_1));
+
+        RCLCPP_INFO(this->get_logger(), "Pure Pursuit Started. Waypoints: %zu", waypoints_.size());
+    }
+
+private:
+    vector<Waypoint> waypoints_;
+    rclcpp::Publisher<ackermann_msgs::msg::AckermannDriveStamped>::SharedPtr drive_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr vis_pub_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+
+    double lookahead_min_;
+    double lookahead_gain_;
+    double wheelbase_;
+
+    bool load_waypoints(string path) {
+        ifstream file(path);
+        if (!file.is_open()) return false;
+
+        string line;
+        getline(file, line); // 헤더 스킵 (# x, y, speed ...)
+
+        while (getline(file, line)) {
+            stringstream ss(line);
+            string cell;
+            vector<string> row;
+            while (getline(ss, cell, ',')) row.push_back(cell);
+
+            if (row.size() >= 3) {
+                Waypoint wp;
+                try {
+                    wp.x = stod(row[0]);
+                    wp.y = stod(row[1]);
+                    wp.v = stod(row[2]); // 3번째 컬럼: 속도
+                    waypoints_.push_back(wp);
+                } catch (...) { continue; }
+            }
+        }
+        return !waypoints_.empty();
+    }
+
+    void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg) {
+        if (waypoints_.empty()) return;
+
+        // 1. 차량 상태 추출
+        double curr_x = msg->pose.pose.position.x;
+        double curr_y = msg->pose.pose.position.y;
+        double curr_vel = msg->twist.twist.linear.x;
+
+        // 쿼터니언 -> Yaw
+        tf2::Quaternion q(
+            msg->pose.pose.orientation.x,
+            msg->pose.pose.orientation.y,
+            msg->pose.pose.orientation.z,
+            msg->pose.pose.orientation.w);
+        tf2::Matrix3x3 m(q);
+        double roll, pitch, yaw;
+        m.getRPY(roll, pitch, yaw);
+
+        // 2. 가장 가까운 웨이포인트 찾기 (Nearest Point)
+        int best_idx = 0;
+        double min_dist_sq = 1e9;
+        
+        // 전체 탐색 (맵이 매우 크면 KD-Tree 써야 하지만, 레이싱 트랙 정도는 괜찮음)
+        for (size_t i = 0; i < waypoints_.size(); i++) {
+            double dx = waypoints_[i].x - curr_x;
+            double dy = waypoints_[i].y - curr_y;
+            double dist_sq = dx*dx + dy*dy;
+            if (dist_sq < min_dist_sq) {
+                min_dist_sq = dist_sq;
+                best_idx = i;
+            }
+        }
+
+        // 3. 목표점(Lookahead Point) 찾기
+        // 속도에 따라 멀리 봄 (Dynamic Lookahead)
+        double lookahead_dist = lookahead_min_ + lookahead_gain_ * curr_vel;
+        
+        int target_idx = best_idx;
+        double dist_sum = 0.0;
+        
+        // 트랙을 따라 앞쪽으로 탐색
+        for (size_t i = 0; i < waypoints_.size(); i++) {
+            int curr_i = (best_idx + i) % waypoints_.size();
+            int next_i = (curr_i + 1) % waypoints_.size();
+            
+            double dx = waypoints_[next_i].x - waypoints_[curr_i].x;
+            double dy = waypoints_[next_i].y - waypoints_[curr_i].y;
+            dist_sum += std::hypot(dx, dy);
+
+            if (dist_sum >= lookahead_dist) {
+                target_idx = next_i;
+                break;
+            }
+        }
+        
+        Waypoint target = waypoints_[target_idx];
+
+        // 4. 제어 입력 계산 (Pure Pursuit Logic)
+        
+        // (1) 목표점을 차량 좌표계(Body Frame)로 변환
+        double dx = target.x - curr_x;
+        double dy = target.y - curr_y;
+        
+        double local_x = cos(-yaw) * dx - sin(-yaw) * dy;
+        double local_y = sin(-yaw) * dx + cos(-yaw) * dy;
+
+        // (2) 조향각 계산: steering = atan(2 * L * y / l_d^2)
+        double dist_to_target_sq = local_x*local_x + local_y*local_y;
+        double curvature = 2.0 * local_y / dist_to_target_sq;
+        double steering_angle = atan(curvature * wheelbase_);
+
+        // 5. 메시지 발행
+        ackermann_msgs::msg::AckermannDriveStamped drive_msg;
+        drive_msg.header = msg->header;
+        drive_msg.drive.steering_angle = steering_angle;
+        drive_msg.drive.speed = target.v; // CSV에 적힌 "최적 속도" 사용!
+        
+        drive_pub_->publish(drive_msg);
+
+        // 6. 시각화 (빨간 공)
+        publish_marker(target.x, target.y);
+    }
+
+    void publish_marker(double x, double y) {
+        visualization_msgs::msg::Marker marker;
+        marker.header.frame_id = "map";
+        marker.header.stamp = this->now();
+        marker.ns = "pure_pursuit";
+        marker.id = 0;
+        marker.type = visualization_msgs::msg::Marker::SPHERE;
+        marker.action = visualization_msgs::msg::Marker::ADD;
+        marker.pose.position.x = x;
+        marker.pose.position.y = y;
+        marker.pose.position.z = 0.5;
+        marker.scale.x = 0.5;
+        marker.scale.y = 0.5;
+        marker.scale.z = 0.5;
+        marker.color.a = 1.0;
+        marker.color.r = 1.0;
+        marker.color.g = 0.0;
+        marker.color.b = 0.0;
+        vis_pub_->publish(marker);
+    }
+};
+
+int main(int argc, char **argv) {
+    rclcpp::init(argc, argv);
+    rclcpp::spin(std::make_shared<PurePursuit>());
+    rclcpp::shutdown();
+    return 0;
+}
