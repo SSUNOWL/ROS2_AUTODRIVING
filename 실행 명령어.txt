@@ -1,0 +1,33 @@
+cd ~/f1_sim_ws
+colcon build
+source install/setup.bash
+ros2 launch f1tenth_gym_ros gym_bridge_launch.py
+
+
+cd ~/f1_sim_ws
+source install/setup.bash
+ros2 launch src/racecar_control_py/launch/nav2_launch.py
+
+cd ~/f1_sim_ws
+source install/setup.bash
+ros2 run racecar_teleop_cpp teleop_converter
+
+cd ~/f1_sim_ws
+source install/setup.bash
+ros2 run racecar_teleop_cpp opp_teleop
+
+cd ~/f1_sim_ws
+source install/setup.bash
+ros2 run racecar_experiments path_timer
+
+cd ~/f1_sim_ws
+source install/setup.bash
+ros2 run racecar_experiments collision_monitor
+
+cd ~/f1_sim_ws
+source install/setup.bash
+ros2 run racecar_experiments path_saver
+
+cd ~/f1_sim_ws
+source install/setup.bash
+ros2 run racecar_experiments static_path_publisher --ros-args -p csv_path:="/home/jsun/f1_sim_ws/path_segment.csv"
