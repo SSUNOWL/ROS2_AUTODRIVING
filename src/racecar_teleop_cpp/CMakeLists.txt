@@ -17,11 +17,11 @@ add_executable(direct_teleop src/direct_teleop.cpp)
 ament_target_dependencies(direct_teleop rclcpp ackermann_msgs)
 ament_target_dependencies(teleop_converter rclcpp geometry_msgs ackermann_msgs)
 
-install(TARGETS
-  teleop_converter
-  DESTINATION lib/${PROJECT_NAME})
-# 설치 경로 지정
+add_executable(opp_teleop src/opp_teleop.cpp)
+ament_target_dependencies(opp_teleop rclcpp ackermann_msgs)
 install(TARGETS
   direct_teleop
+  opp_teleop
+  teleop_converter
   DESTINATION lib/${PROJECT_NAME})
 ament_package()
