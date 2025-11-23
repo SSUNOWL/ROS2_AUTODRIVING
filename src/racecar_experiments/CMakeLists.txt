@@ -12,6 +12,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -32,9 +33,17 @@ ament_target_dependencies(collision_monitor rclcpp sensor_msgs std_msgs)
 add_executable(path_timer src/path_timer.cpp)
 ament_target_dependencies(path_timer rclcpp nav_msgs std_msgs)
 
+add_executable(path_saver src/path_saver.cpp)
+ament_target_dependencies(path_saver rclcpp nav_msgs)
+
+add_executable(static_path_publisher src/static_path_publisher.cpp)
+ament_target_dependencies(static_path_publisher rclcpp nav_msgs geometry_msgs)
+
 install(TARGETS
   collision_monitor
   path_timer
+  path_saver
+  static_path_publisher
   DESTINATION lib/${PROJECT_NAME})
 
 
