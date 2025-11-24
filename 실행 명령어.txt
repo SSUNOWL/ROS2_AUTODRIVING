@@ -43,3 +43,13 @@ ros2 run racecar_experiments path_saver
 cd ~/f1_sim_ws
 source install/setup.bash
 ros2 run racecar_experiments static_path_publisher --ros-args -p csv_path:="/home/jsun/f1_sim_ws/path_segment.csv"
+
+<터미널 9> - 최단시간 랩타임 알고리즘 (offline)
+cd ~/f1_sim_ws
+source install/setup.bash
+ros2 run f1tenth_planner offline_planner --ros-args -p map_path:=$(pwd)/src/f1tenth_gym_ros/maps/Spielberg_map.yaml
+
+<터미널 10> - PP 로 최단시간 랩타임 알고리즘 실행
+cd ~/f1_sim_ws
+source install/setup.bash
+ros2 run f1tenth_planner pure_pursuit_node --ros-args -p csv_path:=$(pwd)/raceline_with_speed.csv
