@@ -1,33 +1,45 @@
+<터미널 1> - 시뮬레이터 (필수)
 cd ~/f1_sim_ws
 colcon build
 source install/setup.bash
 ros2 launch f1tenth_gym_ros gym_bridge_launch.py
 
-
+<터미널 2> - 기존 Nav2 (사용 안할거임)
 cd ~/f1_sim_ws
 source install/setup.bash
 ros2 launch src/racecar_control_py/launch/nav2_launch.py
 
+<터미널 2> - dwa 알고리즘 (필수)
+cd ~/f1_sim_ws
+source install/setup.bash
+ros2 launch racecar_dwa_cpp dwa_local_planner.launch.py
+
+<터미널 3> - 상대 차 조종 시 필요함 (필수)
 cd ~/f1_sim_ws
 source install/setup.bash
 ros2 run racecar_teleop_cpp teleop_converter
 
+<터미널 4> - 상대 차 조종 (필수)
 cd ~/f1_sim_ws
 source install/setup.bash
 ros2 run racecar_teleop_cpp opp_teleop
 
+<터미널 5> - 경로 도착 시간
 cd ~/f1_sim_ws
 source install/setup.bash
 ros2 run racecar_experiments path_timer
 
+<터미널 6> - 충돌 감지
 cd ~/f1_sim_ws
 source install/setup.bash
 ros2 run racecar_experiments collision_monitor
 
+<터미널 7> - 전역 경로 저장
 cd ~/f1_sim_ws
 source install/setup.bash
 ros2 run racecar_experiments path_saver
 
+<터미널 8> - 전역 경로 설정 (필수)
 cd ~/f1_sim_ws
 source install/setup.bash
 ros2 run racecar_experiments static_path_publisher --ros-args -p csv_path:="/home/jsun/f1_sim_ws/path_segment.csv"
