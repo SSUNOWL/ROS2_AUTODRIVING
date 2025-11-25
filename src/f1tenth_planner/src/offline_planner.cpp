@@ -87,7 +87,7 @@ public:
         save_to_csv(final_path, speeds, "raceline_with_speed.csv");
         
         // 6. Rviz 퍼블리시 설정
-        path_pub_ = this->create_publisher<nav_msgs::msg::Path>("/optimal_path", 10);
+        path_pub_ = this->create_publisher<nav_msgs::msg::Path>("/plan", 10);
         generate_path_msg(final_path); 
 
         timer_ = this->create_wall_timer(

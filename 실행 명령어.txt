@@ -14,7 +14,7 @@ cd ~/f1_sim_ws
 source install/setup.bash
 ros2 launch racecar_dwa_cpp dwa_local_planner.launch.py
 
-<터미널 3> - 상대 차 조종 시 필요함 (필수)
+<터미널 3> - /cmd_vel -> /drive로 변경함 (nav2 이용시 사용) 
 cd ~/f1_sim_ws
 source install/setup.bash
 ros2 run racecar_teleop_cpp teleop_converter
@@ -39,10 +39,10 @@ cd ~/f1_sim_ws
 source install/setup.bash
 ros2 run racecar_experiments path_saver
 
-<터미널 8> - 전역 경로 설정 (필수)
+<터미널 8> - 전역 경로 발행 .csv 를 발행함
 cd ~/f1_sim_ws
 source install/setup.bash
-ros2 run racecar_experiments static_path_publisher --ros-args -p csv_path:="/home/jsun/f1_sim_ws/path_segment.csv"
+ros2 run racecar_experiments static_path_publisher --ros-args -p csv_path:="$(pwd)/path_segment.csv"
 
 <터미널 9> - 최단시간 랩타임 알고리즘 (offline)
 cd ~/f1_sim_ws

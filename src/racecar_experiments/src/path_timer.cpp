@@ -63,7 +63,7 @@ private:
       start_x_ = msg->poses.front().pose.position.x;
       start_y_ = msg->poses.front().pose.position.y;
       state_ = IDLE; // 새로운 경로가 오면 상태 리셋
-      RCLCPP_INFO(this->get_logger(), "📍 New Path Received! Start: (%.1f, %.1f)", start_x_, start_y_);
+      RCLCPP_INFO(this->get_logger(), "New Path Received! Start: (%.1f, %.1f)", start_x_, start_y_);
     }
 
     // 도착점 저장 (경로의 마지막 점)
@@ -94,7 +94,7 @@ private:
         {
           start_time_ = this->get_clock()->now();
           state_ = RUNNING;
-          RCLCPP_INFO(this->get_logger(), "🚀 Timer Started! Head to Goal (%.1f, %.1f)", goal_x_, goal_y_);
+          RCLCPP_INFO(this->get_logger(), "Timer Started! Head to Goal (%.1f, %.1f)", goal_x_, goal_y_);
         }
         break;
 
@@ -106,7 +106,7 @@ private:
           double elapsed = (this->get_clock()->now() - start_time_).seconds();
           state_ = FINISHED;
 
-          RCLCPP_INFO(this->get_logger(), "🏁 GOAL REACHED! Time: %.4f seconds", elapsed);
+          RCLCPP_INFO(this->get_logger(), "GOAL REACHED! Time: %.4f seconds", elapsed);
           
           auto time_msg = std_msgs::msg::Float32();
           time_msg.data = elapsed;
