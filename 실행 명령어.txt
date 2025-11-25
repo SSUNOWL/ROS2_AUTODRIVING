@@ -51,7 +51,9 @@ ros2 run racecar_experiments path_saver
 <터미널 8> - 전역 경로 발행 .csv 를 발행함
 cd ~/f1_sim_ws
 source install/setup.bash
-ros2 run racecar_experiments static_path_publisher --ros-args -p csv_path:="$(pwd)/path_segment.csv"
+ros2 run racecar_experiments static_path_publisher --ros-args -p csv_path:="$(pwd)/path_segment.csv" // 사용자 지정 경로
+
+ros2 run racecar_experiments static_path_publisher --ros-args -p csv_path:="$(pwd)/raceline_with_speed.csv" // 트랙 전용
 
 <터미널 9> - 최단시간 랩타임 알고리즘 (offline)
 cd ~/f1_sim_ws
