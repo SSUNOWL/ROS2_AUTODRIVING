@@ -61,7 +61,7 @@ public:
       std::bind(&DwaLocalPlanner::scanCallback, this, std::placeholders::_1));
 
     path_sub_ = create_subscription<nav_msgs::msg::Path>(
-      "/plan", 10,
+      "/optimal_path", 10,
       std::bind(&DwaLocalPlanner::pathCallback, this, std::placeholders::_1));
 
     drive_pub_ = create_publisher<ackermann_msgs::msg::AckermannDriveStamped>(

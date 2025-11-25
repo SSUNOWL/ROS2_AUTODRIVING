@@ -26,7 +26,9 @@ def generate_launch_description():
             name='dwa_local_planner',
             output='screen',
             parameters=[params_file,
-                        {'use_sim_time': use_sim_time}]
+                        {'use_sim_time': use_sim_time}],
+            remappings=[
+        ('/plan', '/optimal_path')]
         )
     ])
 
