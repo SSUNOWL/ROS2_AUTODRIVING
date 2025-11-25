@@ -168,11 +168,37 @@ global_costmap:
 
 planner_server:
   ros__parameters:
-    expected_planner_frequency: 5.0
+    expected_planner_frequency: 10.0 # 주기가 너무 느리면 답답할 수 있어 10~20 추천
     use_sim_time: True
     planner_plugins: ["GridBased"]
     GridBased:
-      plugin: "nav2_navfn_planner/NavfnPlanner"
-      tolerance: 0.5
-      use_astar: false
+      plugin: "nav2_smac_planner/SmacPlannerHybrid"
+      
+      # [F1Tenth 중요 설정] 차량의 최소 회전 반경 (단위: m)
+      # 실제 차량의 조향각 한계에 맞춰 설정 (보통 0.4 ~ 0.6)
+      minimum_turning_radius: 0.50
+      
+      # 탐색 모델: DUBINS(전진만), REEDS_SHEPP(전진+후진)
+      # 일반적인 주행 및 좁은 곳 탈출을 위해 REEDS_SHEPP 권장
+      motion_model_for_search: "REEDS_SHEPP" 
+
+      # 경로 평활화 (거친 격자 경로를 부드럽게)
+      smooth_path: True 
+      
+      # 알고리즘 세부 튜닝
+      downsample_costmap: false       # 맵 해상도 유지 (정밀도 높임)
+      angle_quantization_bins: 72     # 360도를 72개(5도 단위)로 쪼개서 탐색
+      analytic_expansion_ratio: 3.5   # 목표지점이 가까우면 분석적으로 연결 (속도 향상)
+      
+      # 비용 가중치 (경로의 성향 결정)
+      reverse_penalty: 2.0            # 후진보다는 전진을 선호하도록 페널티 부여
+      change_penalty: 0.05            # 잦은 방향 전환 방지
+      non_straight_penalty: 1.2       # 직진 선호
+      cost_penalty: 2.0               # 장애물 근처 페널티
+
+      # 기본 설정
+      tolerance: 0.25
       allow_unknown: true
+      max_iterations: 8000
+      max_on_approach_iterations: 1000
+      max_planning_time: 5.0

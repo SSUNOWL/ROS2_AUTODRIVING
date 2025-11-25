@@ -2,9 +2,16 @@
 #include <termios.h>
 #include <unistd.h>
 #include <map>
+#include <thread>
+#include <mutex>
+#include <cmath>
+#include <iomanip>
+#include <sys/select.h>
+#include <algorithm> // std::max, std::min, std::clamp 사용
 
 #include "rclcpp/rclcpp.hpp"
 #include "ackermann_msgs/msg/ackermann_drive_stamped.hpp"
+#include "nav_msgs/msg/odometry.hpp"
 
 // 키 코드 정의
 #define KEYCODE_W 0x77
@@ -17,11 +24,10 @@
 // 안내 메시지
 const char* msg = R"(
 ---------------------------
-F1TENTH C++ Direct Controller
----------------------------
 Moving around:
         W
    A    S    D
+        X
 
 W: Increase Speed
 S: Stop (Zero Speed)
@@ -38,19 +44,54 @@ class OppenetTeleop : public rclcpp::Node
 public:
     OppenetTeleop() : Node("oppenet_teleop")
     {
-        publisher_ = this->create_publisher<ackermann_msgs::msg::AckermannDriveStamped>("/opp_drive", 10);
-        speed_ = 0.0;
-        steering_angle_ = 0.0;
+        // 1. 명령 퍼블리셔
+        pub_drive_ = this->create_publisher<ackermann_msgs::msg::AckermannDriveStamped>("/opp_drive", 10);
+        
+        // 2. 실제 속도/각도 추정을 위한 서브스크라이버
+        sub_odom_ = this->create_subscription<nav_msgs::msg::Odometry>(
+            "/opp_racecar/odom", 10, 
+            std::bind(&OppenetTeleop::odom_callback, this, std::placeholders::_1));
+
+        target_speed_ = 0.0;
+        target_steering_angle_ = 0.0;
+        
+        actual_speed_ = 0.0;
+        estimated_steering_angle_ = 0.0;
+
         RCLCPP_INFO(this->get_logger(), "Oppenet Teleop Node Started");
     }
 
-    // 키보드 입력을 받는 메인 루프
+    void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg)
+    {
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        
+        // 1. 실제 선속도 업데이트
+        actual_speed_ = msg->twist.twist.linear.x;
+        double angular_z = msg->twist.twist.angular.z; // Yaw Rate (rad/s)
+
+        // 2. [Feedback] 실제 차량의 움직임을 기반으로 조향각 역산 (Estimation)
+        // 공식: tan(steer) = (wheelbase * yaw_rate) / velocity
+        double wheelbase = 0.33; 
+        double raw_estimate = 0.0;
+
+        // [유지] 저속 주행 시 노이즈 방지 (화면 표시용)
+        if (std::abs(actual_speed_) > 0.5) {
+            raw_estimate = std::atan((wheelbase * angular_z) / actual_speed_);
+        } else {
+            raw_estimate = 0.0;
+        }
+
+        // [유지] 화면 표시용 클램핑 및 필터
+        raw_estimate = std::clamp(raw_estimate, -0.4, 0.4);
+        double alpha = 0.1; 
+        estimated_steering_angle_ = (alpha * raw_estimate) + ((1.0 - alpha) * estimated_steering_angle_);
+    }
+
     void keyLoop()
     {
         char c;
-        bool dirty = false;
-
-        // 터미널 설정 가져오기 (Raw 모드 전환을 위해)
+        
+        // 터미널 설정 (Raw 모드)
         tcgetattr(kfd, &cooked);
         memcpy(&raw, &cooked, sizeof(struct termios));
         raw.c_lflag &= ~(ICANON | ECHO);
@@ -62,72 +103,118 @@ public:
 
         while (rclcpp::ok())
         {
-            // 키 입력 읽기 (Blocking 방식이지만 read로 1바이트씩 읽음)
-            if (read(kfd, &c, 1) < 0)
+            fd_set set;
+            FD_ZERO(&set);
+            FD_SET(kfd, &set);
+
+            struct timeval timeout;
+            timeout.tv_sec = 0;
+            timeout.tv_usec = 100000; // 0.1초 (루프 주기)
+
+            int res = select(kfd + 1, &set, NULL, NULL, &timeout);
+
+            bool steering_input_active = false; // 이번 루프에서 조향 키를 눌렀는지 확인
+
+            if (res > 0)
             {
-                perror("read():");
-                exit(-1);
+                if (read(kfd, &c, 1) < 0) {
+                    perror("read():");
+                    exit(-1);
+                }
+
+                switch(c)
+                {
+                    case KEYCODE_W:
+                        target_speed_ += 0.5;
+                        break;
+                    case KEYCODE_S:
+                        target_speed_ = 0.0;
+                        target_steering_angle_ = 0.0;
+                        break;
+                    case KEYCODE_X:
+                        target_speed_ -= 0.5;
+                        break;
+                    case KEYCODE_A:
+                        // 조향 민감도 (빠른 조향)
+                        target_steering_angle_ += 0.2; 
+                        steering_input_active = true;
+                        break;
+                    case KEYCODE_D:
+                        // 조향 민감도
+                        target_steering_angle_ -= 0.2;
+                        steering_input_active = true;
+                        break;
+                    case KEYCODE_Q:
+                        RCLCPP_INFO(this->get_logger(), "Exiting...");
+                        return;
+                }
             }
 
-            // 키 입력 처리
-            switch(c)
+            // ---------------------------------------------------------
+            // [기능 추가] 핸들 자동 풀림 (Auto-Centering)
+            // ---------------------------------------------------------
+            if (!steering_input_active && std::abs(target_steering_angle_) > 0.001)
             {
-                case KEYCODE_W:
-                    speed_ += 0.5;
-                    dirty = true;
-                    break;
-                case KEYCODE_S:
-                    speed_ = 0.0;
-                    steering_angle_ = 0.0;
-                    dirty = true;
-                    break;
-                case KEYCODE_X:
-                    speed_ -= 0.5;
-                    dirty = true;
-                    break;
-                case KEYCODE_A:
-                    steering_angle_ += 0.1;
-                    dirty = true;
-                    break;
-                case KEYCODE_D:
-                    steering_angle_ -= 0.1;
-                    dirty = true;
-                    break;
-                case KEYCODE_Q: // q를 눌러도 종료
-                    RCLCPP_INFO(this->get_logger(), "Exiting...");
-                    return;
+                // 복원 속도 (천천히 풀림)
+                double center_speed = 0.015; 
+
+                if (target_steering_angle_ > 0)
+                    target_steering_angle_ = std::max(0.0, target_steering_angle_ - center_speed);
+                else
+                    target_steering_angle_ = std::min(0.0, target_steering_angle_ + center_speed);
             }
 
-            // 속도 및 조향각 제한
-            if (speed_ > 5.0) speed_ = 5.0;
-            if (speed_ < -3.0) speed_ = -3.0;
-            if (steering_angle_ > 0.4) steering_angle_ = 0.4;
-            if (steering_angle_ < -0.4) steering_angle_ = -0.4;
+            // 제한 (Saturation) - 단순 최대/최소 제한으로 복귀
+            if (target_speed_ > 7.0) target_speed_ = 7.0;
+            if (target_speed_ < -5.0) target_speed_ = -5.0;
+            if (target_steering_angle_ > 0.4) target_steering_angle_ = 0.4;
+            if (target_steering_angle_ < -0.4) target_steering_angle_ = -0.4;
 
-            // 메시지 발행
+            // 명령 발행
             auto drive_msg = ackermann_msgs::msg::AckermannDriveStamped();
-            drive_msg.drive.speed = speed_;
-            drive_msg.drive.steering_angle = steering_angle_;
-            publisher_->publish(drive_msg);
+            drive_msg.header.stamp = this->now();
+            drive_msg.header.frame_id = "base_link";
+            drive_msg.drive.speed = target_speed_;
+            drive_msg.drive.steering_angle = target_steering_angle_;
+            pub_drive_->publish(drive_msg);
 
-            if (dirty)
-            {
-                std::cout << "\rSpeed: " << speed_ << "\tSteer: " << steering_angle_ << "     " << std::flush;
-                dirty = false;
-            }
+            // 상태 출력
+            print_status();
         }
     }
 
-    // 소멸자: 프로그램 종료 시 터미널 설정을 원상복구해야 함
     ~OppenetTeleop()
     {
         tcsetattr(kfd, TCSANOW, &cooked);
     }
 
 private:
-    rclcpp::Publisher<ackermann_msgs::msg::AckermannDriveStamped>::SharedPtr publisher_;
-    double speed_;
-    double steering_angle_;
+    void print_status()
+    {
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        
+        // 화면 갱신
+        std::cout << "\033[2K\r" 
+                  << std::fixed << std::setprecision(2)
+                  << "[CMD] Spd:" << target_speed_ 
+                  << " Str:" << target_steering_angle_
+                  << " > "
+                  << "[REAL] Spd:" << actual_speed_ 
+                  << " Est.Str:" << estimated_steering_angle_
+                  << std::flush;
+    }
+
+    rclcpp::Publisher<ackermann_msgs::msg::AckermannDriveStamped>::SharedPtr pub_drive_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_odom_;
+    
+    double target_speed_;
+    double target_steering_angle_;
+    
+    double actual_speed_;
+    double estimated_steering_angle_;
+
+    std::mutex data_mutex_;
+
     int kfd = 0;
     struct termios cooked, raw;
 };
@@ -136,10 +223,17 @@ int main(int argc, char** argv)
 {
     rclcpp::init(argc, argv);
     auto node = std::make_shared<OppenetTeleop>();
-    
-    // 루프 실행
+
+    std::thread spin_thread([node]() {
+        rclcpp::spin(node);
+    });
+
     node->keyLoop();
 
     rclcpp::shutdown();
+    if (spin_thread.joinable()) {
+        spin_thread.join();
+    }
+    
     return 0;
 }

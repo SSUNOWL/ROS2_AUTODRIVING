@@ -204,6 +204,8 @@ private:
         if (binary_map.at<uchar>(binary_map.rows-1, binary_map.cols-1) == 255) 
             cv::floodFill(binary_map, cv::Point(binary_map.cols-1, binary_map.rows-1), cv::Scalar(0));
 
+        // cv::imwrite("debug_floodfill_map.png", binary_map); //저장 코드
+
         // [삭제됨] debug_floodfill_map.png 저장 코드 제거
 
         RCLCPP_INFO(this->get_logger(), "Step 2: Thinning..."); 

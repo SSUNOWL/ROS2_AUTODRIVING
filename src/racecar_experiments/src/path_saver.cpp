@@ -16,7 +16,7 @@ public:
     sub_path_ = this->create_subscription<nav_msgs::msg::Path>(
       "/plan", 10, std::bind(&PathSaver::path_callback, this, std::placeholders::_1));
 
-    RCLCPP_INFO(this->get_logger(), "💾 Path Saver Waiting for /plan topic...");
+    RCLCPP_INFO(this->get_logger(), "Path Saver Waiting for /plan topic...");
   }
 
 private:
@@ -71,7 +71,7 @@ private:
     }
 
     file.close();
-    RCLCPP_INFO(this->get_logger(), "✅ Path SAVED to %s (%zu points) with CALCULATED YAW.", filename.c_str(), path_size);
+    RCLCPP_INFO(this->get_logger(), "Path SAVED to %s (%zu points) with CALCULATED YAW.", filename.c_str(), path_size);
     
     // 저장 완료 후 종료
     rclcpp::shutdown();
