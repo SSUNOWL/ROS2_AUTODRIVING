@@ -23,6 +23,5 @@ def generate_launch_description():
             name='frenet_local_planner',
             output='screen',
             parameters=[os.path.join(package_share_directory, 'config', 'params.yaml')],
-            remappings=[('/scan', '/robot/scan'), ('/ego_racecar/odom', '/robot/odom')]
         )
     ])

@@ -172,7 +172,7 @@ public:
       std::bind(&FrenetLocalPlanner::odomCallback, this, _1));
 
     scan_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
-      "/scan", 10,
+      "/ego_racecar/scan", 10,
       std::bind(&FrenetLocalPlanner::scanCallback, this, _1));
 
     global_path_sub_ = this->create_subscription<nav_msgs::msg::Path>(
