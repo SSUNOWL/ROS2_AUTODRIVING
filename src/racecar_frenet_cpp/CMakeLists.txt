@@ -27,7 +27,7 @@ ament_target_dependencies(frenet_local_planner
   geometry_msgs
   tf2
   tf2_geometry_msgs
-  Eigen3::Eigen
+  Eigen3
 )
 
 # 실행 파일 설치
