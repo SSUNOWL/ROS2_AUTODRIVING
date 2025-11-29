@@ -5,7 +5,7 @@
 #include <geometry_msgs/msg/point.hpp>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
-
+#include <nav_msgs/msg/path.hpp>
 #include <iostream>
 #include <fstream>
 #include <vector>
@@ -24,43 +24,66 @@ struct Waypoint {
 
 class PurePursuit : public rclcpp::Node {
 public:
-    PurePursuit() : Node("pure_pursuit_node") {
+        PurePursuit() : Node("pure_pursuit_node") {
         // --- 파라미터 설정 ---
         this->declare_parameter("csv_path", "raceline_with_speed.csv");
-        this->declare_parameter("lookahead_min", 1.0);  // 최소 전방 주시 거리
-        this->declare_parameter("lookahead_gain", 0.3); // 속도 비례 주시 거리 (Lookahead = min + v * gain)
-        this->declare_parameter("wheelbase", 0.33);     // 차량 휠베이스 (F1TENTH 기준)
+        this->declare_parameter("lookahead_min", 1.0);
+        this->declare_parameter("lookahead_gain", 0.3);
+        this->declare_parameter("wheelbase", 0.33);
+
+        // 새 파라미터: Frenet local path 사용 여부 + 토픽 이름
+        this->declare_parameter("use_frenet_path", false);
+        this->declare_parameter("frenet_path_topic", "/frenet_local_plan");
 
         string csv_path = this->get_parameter("csv_path").as_string();
         lookahead_min_ = this->get_parameter("lookahead_min").as_double();
         lookahead_gain_ = this->get_parameter("lookahead_gain").as_double();
         wheelbase_ = this->get_parameter("wheelbase").as_double();
 
-        // 1. CSV 파일 로드
-        if (!load_waypoints(csv_path)) {
-            RCLCPP_ERROR(this->get_logger(), "Failed to load CSV file!");
-            rclcpp::shutdown();
+        use_frenet_path_ = this->get_parameter("use_frenet_path").as_bool();
+        frenet_path_topic_ = this->get_parameter("frenet_path_topic").as_string();
+
+        if (!use_frenet_path_) {
+            // 기존 동작: CSV에서 waypoint 로드
+            if (!load_waypoints(csv_path)) {
+                RCLCPP_ERROR(this->get_logger(), "Failed to load CSV file!");
+                rclcpp::shutdown();
+            }
+            RCLCPP_INFO(this->get_logger(),
+                        "Pure Pursuit using CSV waypoints: %s",
+                        csv_path.c_str());
+        } else {
+            // Frenet local path를 ROS 토픽으로 받음
+            path_sub_ = this->create_subscription<nav_msgs::msg::Path>(
+                frenet_path_topic_, 10,
+                std::bind(&PurePursuit::path_callback, this, std::placeholders::_1));
+
+            RCLCPP_INFO(this->get_logger(),
+                        "Pure Pursuit using Frenet path from topic: %s",
+                        frenet_path_topic_.c_str());
         }
 
-        // 2. Publisher & Subscriber
-        // F1TENTH 시뮬레이터는 '/drive' 토픽을 사용
+        // 2. Publisher & Subscriber (나머지는 그대로)
         drive_pub_ = this->create_publisher<ackermann_msgs::msg::AckermannDriveStamped>("/drive", 10);
-        
-        // 디버깅용 마커 (Rviz에서 목표점 확인)
         vis_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/pure_pursuit_marker", 10);
 
-        // 오도메트리 구독
         odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-            "/ego_racecar/odom", 10, std::bind(&PurePursuit::odom_callback, this, std::placeholders::_1));
+            "/ego_racecar/odom", 10,
+            std::bind(&PurePursuit::odom_callback, this, std::placeholders::_1));
 
         RCLCPP_INFO(this->get_logger(), "Pure Pursuit Started. Waypoints: %zu", waypoints_.size());
     }
+
 
 private:
     vector<Waypoint> waypoints_;
     rclcpp::Publisher<ackermann_msgs::msg::AckermannDriveStamped>::SharedPtr drive_pub_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr vis_pub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+    rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
+
+    bool use_frenet_path_;
+    std::string frenet_path_topic_;
 
     double lookahead_min_;
     double lookahead_gain_;
@@ -195,6 +218,25 @@ private:
         marker.color.b = 0.0;
         vis_pub_->publish(marker);
     }
+        void path_callback(const nav_msgs::msg::Path::SharedPtr msg) {
+        // Frenet 노드가 퍼블리시한 local path를 waypoints_로 변환
+        std::vector<Waypoint> new_wps;
+        new_wps.reserve(msg->poses.size());
+
+        for (const auto & ps : msg->poses) {
+            Waypoint wp;
+            wp.x = ps.pose.position.x;
+            wp.y = ps.pose.position.y;
+            // Frenet local planner가 z에 속도 v를 저장함
+            wp.v = ps.pose.position.z;
+            new_wps.push_back(wp);
+        }
+
+        if (!new_wps.empty()) {
+            waypoints_ = std::move(new_wps);
+        }
+    }
+
 };
 
 int main(int argc, char **argv) {
