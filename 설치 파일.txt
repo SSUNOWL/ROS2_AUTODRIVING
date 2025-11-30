@@ -1,0 +1,35 @@
+1) 기본 개발도구 + ROS2 + 의존성 설치
+sudo apt update
+sudo apt install -y \
+  build-essential \
+  cmake \
+  git \
+  python3-pip \
+  python3-rosdep \
+  python3-colcon-common-extensions \
+  python3-vcstool \
+  ros-humble-desktop \
+  ros-humble-ackermann-msgs \
+  libopencv-dev \
+  libyaml-cpp-dev
+
+2) rosdep 초기화 → ROS 패키지 의존성 자동 설치
+sudo rosdep init  # (처음 1번만)
+rosdep update
+
+# src 폴더가 들어있는 워크스페이스 경로에서 실행해야 한다!!!
+cd ~/ros2_ws
+rosdep install --from-paths src --ignore-src -r -y
+
+3) Python 의존성 설치 (f1tenth_gym + gym 환경)
+pip install \
+  gym==0.19.0 \
+  "numpy<=1.22.0,>=1.18.0" \
+  Pillow>=9.0.1 \
+  scipy>=1.7.3 \
+  numba>=0.55.2 \
+  pyyaml>=5.3.1 \
+  "pyglet<1.5" \
+  pyopengl \
+  transforms3d
+

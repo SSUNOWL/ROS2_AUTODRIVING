@@ -1,0 +1,10 @@
+frenet_local_planner:
+  ros__parameters:
+    max_speed: 8.0      # 최대 속도 (m/s)
+    max_accel: 2.0      # 최대 가속도 (m/ss)
+    max_curvature: 1.0  # 최대 곡률 (1/m)
+    s_horizon: 15.0     # 계획 길이 (m)
+    target_speed: 6.0   # 목표 속도 (m/s)
+    dt: 0.2             # 시간 스텝 (초)
+    max_road_width: 2.0 # 도로의 최대 너비 (m)
+    d_road_width_res: 0.25 # Lateral 샘플링 간격 (m)

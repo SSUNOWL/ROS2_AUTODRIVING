@@ -51,7 +51,9 @@ ros2 run racecar_experiments path_saver
 <터미널 8> - 전역 경로 발행 .csv 를 발행함
 cd ~/f1_sim_ws
 source install/setup.bash
-ros2 run racecar_experiments static_path_publisher --ros-args -p csv_path:="$(pwd)/path_segment.csv"
+ros2 run racecar_experiments static_path_publisher --ros-args -p csv_path:="$(pwd)/path_segment.csv" // 사용자 지정 경로
+
+ros2 run racecar_experiments static_path_publisher --ros-args -p csv_path:="$(pwd)/raceline_with_speed.csv" // 트랙 전용
 
 <터미널 9> - 최단시간 랩타임 알고리즘 (offline)
 cd ~/f1_sim_ws
@@ -62,3 +64,37 @@ ros2 run f1tenth_planner offline_planner --ros-args -p map_path:=$(pwd)/src/f1te
 cd ~/f1_sim_ws
 source install/setup.bash
 ros2 run f1tenth_planner pure_pursuit_node --ros-args -p csv_path:=$(pwd)/raceline_with_speed.csv
+
+
+
+<Frenet 지역 경로 실행하기 위해 필요한 최소한의 터미널 구성>
+
+터미널 1
+cd ~/f1_sim_ws
+source install/setup.bash 
+ros2 launch f1tenth_gym_ros gym_bridge_launch.py 
+
+터미널 2 - Frenet 알고리즘
+cd ~/f1_sim_ws
+source install/setup.bash
+ros2 launch racecar_frenet_cpp frenet_local_planner.launch.py 
+
+터미널 3 - 상대차 조작
+cd ~/f1_sim_ws
+source install/setup.bash
+ros2 run racecar_teleop_cpp opp_teleop 
+
+터미널 4 
+cd ~/f1_sim_ws
+source install/setup.bash
+ros2 run racecar_experiments static_path_publisher --ros-args -p csv_path:="$(pwd)/raceline_with_speed.csv"
+
+터미널 5 (이미 CSV 파일이 있다면 실행 안해도 됨)
+cd ~/f1_sim_ws
+source install/setup.bash 
+ros2 run f1tenth_planner offline_planner --ros-args -p map_path:=$(pwd)/src/f1tenth_gym_ros/maps/Spielberg_map.yaml
+
+터미널 6 - 실질적인 시작버튼. 상대차, 자차 주행을 시작함
+cd ~/f1_sim_ws
+source install/setup.bash
+ros2 run f1tenth_planner pure_pursuit_node --ros-args -p use_frenet_path:=true -p frenet_path_topic:=/frenet_local_plan 
