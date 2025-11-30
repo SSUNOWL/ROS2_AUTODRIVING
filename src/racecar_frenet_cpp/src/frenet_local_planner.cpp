@@ -350,11 +350,11 @@ private:
     if (!has_odom_ || ref_points_.empty()) return false;
 
     // 장애물 관련 파라미터
-    const double safe_radius    = 0.25;   // 이 안이면 충돌로 간주
-    const double soft_radius    = 0.8;   // 이 안이면 cost 크게
+    const double safe_radius    = 0.2;   // 이 안이면 충돌로 간주
+    const double soft_radius    = 1.0;   // 이 안이면 cost 크게
     const double k_obs          = 3.0;  // 장애물 cost 가중치
-    const double emergency_dist = 0.7;   // 이 안이면 강하게 감속
-    const double escape_dist    = 0.4;   // 이 안이면 "탈출 모드"
+    const double emergency_dist = 0.5;   // 이 안이면 강하게 감속
+    const double escape_dist    = 0.35;   // 이 안이면 "탈출 모드"
 
     // 1. 현재 상태 (x,y,yaw,v) → (s, d, s_d, d_d, d_dd)
     const auto & pose = latest_odom_.pose.pose;
