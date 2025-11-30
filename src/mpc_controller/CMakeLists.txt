@@ -16,6 +16,8 @@ find_package(Eigen3 REQUIRED)
 find_package(ackermann_msgs REQUIRED)
 find_package(OsqpEigen REQUIRED) # OSQP Wrapper
 find_package(sensor_msgs REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED) 
+find_package(visualization_msgs REQUIRED)
 
 # Include 디렉토리 설정
 include_directories(
@@ -65,6 +67,8 @@ ament_target_dependencies(mpc_node
   Eigen3
   ackermann_msgs
   sensor_msgs
+  tf2_geometry_msgs 
+  visualization_msgs 
 )
 
 # 우리가 만든 라이브러리(Solver + Dynamics) 링크

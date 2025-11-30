@@ -14,14 +14,21 @@ public:
     MPCSolver();
     ~MPCSolver();
 
+    struct Obstacle {
+        double x;
+        double y;
+        double r; // 장애물 반지름 + 차량 반지름 + 여유마진(Safety Margin)
+    };
     // 초기화: 예측 구간(Horizon)과 시간 간격(dt) 설정
     void init(int horizon, double dt);
 
     // 핵심 함수: 현재 상태와 목표 경로를 받아 최적의 입력을 계산
     // reference_trajectory: 앞으로 N스텝 동안의 목표 상태들
-    Input solve(const State& current_state, const std::vector<State>& reference_trajectory);
-
+    Input solve(const State& current_state, 
+                const std::vector<State>& ref_traj,
+                const std::vector<Obstacle>& obstacles); // <--- Added obstacles
     std::vector<State> getPredictedTrajectory() const;
+    
 private:
     // MPC 파라미터
     int N_;          // 예측 구간 (Horizon Length)
@@ -46,6 +53,7 @@ private:
                       const Eigen::DiagonalMatrix<double, Eigen::Dynamic>& R,
                       const State& current_state,
                       const std::vector<State>& ref_traj,
+                      const std::vector<Obstacle>& obstacles, // <--- Added obstacles
                       Eigen::SparseMatrix<double>& hessianMatrix,
                       Eigen::VectorXd& gradient,
                       Eigen::SparseMatrix<double>& linearMatrix,
