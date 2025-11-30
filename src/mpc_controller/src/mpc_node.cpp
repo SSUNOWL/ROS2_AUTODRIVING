@@ -6,7 +6,8 @@
 #include "ackermann_msgs/msg/ackermann_drive_stamped.hpp"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2/LinearMath/Matrix3x3.h"
-
+#include "visualization_msgs/msg/marker.hpp" // 장애물 시각화용
+#include "sensor_msgs/msg/laser_scan.hpp"
 #include "mpc_controller/mpc_solver.hpp"
 
 using namespace std::chrono_literals;
@@ -16,9 +17,9 @@ class MPCNode : public rclcpp::Node
 public:
     MPCNode() : Node("mpc_node")
     {
-        this->declare_parameter("horizon", 20);
+        this->declare_parameter("horizon", 30);
         this->declare_parameter("dt", 0.1);
-        this->declare_parameter("target_speed", 2.0);
+        this->declare_parameter("target_speed", 3.0);
 
         int horizon = this->get_parameter("horizon").as_int();
         double dt = this->get_parameter("dt").as_double();
@@ -32,6 +33,11 @@ public:
         sub_path_ = this->create_subscription<nav_msgs::msg::Path>(
             "/plan", 10, std::bind(&MPCNode::pathCallback, this, std::placeholders::_1));
 
+        sub_scan_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
+            "/scan", 10, std::bind(&MPCNode::scanCallback, this, std::placeholders::_1));
+
+        pub_obs_marker_ = this->create_publisher<visualization_msgs::msg::Marker>(
+            "/mpc_obstacle_marker", 10);
         pub_drive_ = this->create_publisher<ackermann_msgs::msg::AckermannDriveStamped>(
             "/drive", 10);
 
@@ -64,7 +70,12 @@ private:
     mpc_controller::State current_state_;
     std::vector<mpc_controller::State> global_path_;
     
+    rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr sub_scan_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_obs_marker_;
+
+    std::vector<mpc_controller::Obstacle> detected_obstacles_; // 감지된 장애물 저장
     
+
     bool odom_received_ = false;
     bool path_received_ = false;
     double target_speed_ = 2.0;
@@ -131,6 +142,108 @@ private:
         return angle;
     }
 
+    void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
+    {
+        // 1. ROI 설정 (내 차선 위주)
+        double roi_min_x = 0.0; 
+        double roi_max_x = 3.5; // 3.5m 이내
+        double roi_min_y = -0.6; 
+        double roi_max_y = 0.6;
+
+        detected_obstacles_.clear(); // 기존 장애물 비우기
+
+        // 시각화용 변수 (가장 가까운 놈 하나만 표시)
+        mpc_controller::Obstacle closest_for_viz;
+        double min_dist_sq_for_viz = std::numeric_limits<double>::max();
+        bool found_any = false;
+
+        // [최적화 1] Stride 5: 5칸씩 건너뛰며 검사
+        int stride = 5; 
+
+        for (size_t i = 0; i < msg->ranges.size(); i += stride) {
+            double range = msg->ranges[i];
+            
+            if (!std::isfinite(range) || range < msg->range_min || range > msg->range_max) 
+                continue;
+
+            double angle = msg->angle_min + i * msg->angle_increment;
+            
+            double lx = range * std::cos(angle);
+            double ly = range * std::sin(angle);
+
+            // ROI 필터링
+            if (lx > roi_min_x && lx < roi_max_x &&
+                ly > roi_min_y && ly < roi_max_y) 
+            {
+                // [전략 변경] ROI 내의 모든 장애물을 리스트에 추가합니다.
+                mpc_controller::Obstacle obs;
+                obs.x = lx;
+                obs.y = ly;
+                obs.r = 0.55; // 장애물 반지름 (안전 마진)
+                
+                detected_obstacles_.push_back(obs);
+
+                // 시각화를 위해 가장 가까운 놈 찾기
+                double d2 = lx*lx + ly*ly;
+                if (d2 < min_dist_sq_for_viz) {
+                    min_dist_sq_for_viz = d2;
+                    closest_for_viz = obs;
+                    found_any = true;
+                }
+            }
+        }
+
+        // 시각화는 가장 위험한(가까운) 녀석 하나만 합니다.
+        // (모두 다 그리려면 MarkerArray가 필요해서 코드가 복잡해짐)
+        if (found_any) {
+            publishObstacleMarker(closest_for_viz);
+        } else {
+            // 장애물이 없으면 마커를 안 보이게 치우거나 그냥 둡니다.
+            deleteObstacleMarker(); 
+        }
+
+
+    }
+
+    void publishObstacleMarker(const mpc_controller::Obstacle& obs) {
+        visualization_msgs::msg::Marker marker;
+        marker.header.frame_id = "ego_racecar/base_link"; // 내 차 기준
+        marker.header.stamp = rclcpp::Time(0);
+        marker.ns = "mpc_obstacle";
+        marker.id = 0;
+        marker.type = visualization_msgs::msg::Marker::SPHERE;
+        marker.action = visualization_msgs::msg::Marker::ADD;
+
+        marker.pose.position.x = obs.x;
+        marker.pose.position.y = obs.y;
+        marker.pose.position.z = 0.5; // [수정] 바닥에 묻히지 않게 50cm 띄움
+        
+        marker.scale.x = obs.r * 2.0; 
+        marker.scale.y = obs.r * 2.0;
+        marker.scale.z = 0.5; // [수정] 높이도 좀 키움
+
+        marker.color.a = 1.0; // [수정] 투명도 1.0 (완전 불투명)
+        marker.color.r = 1.0; 
+        marker.color.g = 0.0;
+        marker.color.b = 0.0;
+
+        // [중요] Lifetime을 0.2초 정도로 줍니다. 
+        // 0이면 영구 지속인데, 업데이트가 잦으면 Rviz에서 깜빡일 수 있습니다.
+        // 적절한 시간을 주어 자연스럽게 갱신되게 합니다.
+        marker.lifetime = rclcpp::Duration::from_seconds(0);
+
+        pub_obs_marker_->publish(marker);
+    }
+
+    void deleteObstacleMarker() {
+        visualization_msgs::msg::Marker marker;
+        marker.header.frame_id = "ego_racecar/base_link";
+        marker.header.stamp = this->now();
+        marker.ns = "mpc_obstacle";
+        marker.id = 0;
+        marker.action = visualization_msgs::msg::Marker::DELETE;
+        pub_obs_marker_->publish(marker);
+    }
     void controlLoop()
     {
         if (!odom_received_ || !path_received_ || global_path_.empty()) return;
@@ -212,28 +325,36 @@ private:
         local_current_state.vy = current_state_.vy;
         local_current_state.omega = current_state_.omega;
 
-        mpc_controller::Input input = solver_.solve(local_current_state, local_ref_traj);
+        mpc_controller::Input input = solver_.solve(local_current_state, local_ref_traj, detected_obstacles_);
 
-        // 4. Drive Command 발행
         auto drive_msg = ackermann_msgs::msg::AckermannDriveStamped();
         drive_msg.header.stamp = this->now();
-        drive_msg.header.frame_id = "base_link";
-        
-        // Body Frame에서는 조향각 부호 이슈가 명확해집니다.
-        // 왼쪽(Local y+)으로 가려면 양수, 오른쪽이면 음수.
-        // 시뮬레이터에 맞춰 부호를 결정하세요. (일단 - 유지)
+        drive_msg.header.frame_id = "ego_racecar/base_link";
+
+        // 1. 조향각 설정 (MPC 계산 결과 그대로 사용)
         drive_msg.drive.steering_angle = input.delta; 
         drive_msg.drive.acceleration = input.acc;
 
-        // 속도 명령
-        auto local_pred_traj = solver_.getPredictedTrajectory();
-        double cmd_speed = (local_pred_traj.size() > 1) ? local_pred_traj[1].vx : target_speed_;
-        if (std::abs(cmd_speed) > 0.1 && std::abs(cmd_speed) < 1.0) {
-            cmd_speed = (cmd_speed > 0) ? 1.0 : -1.0;
-        }
-        drive_msg.drive.speed = cmd_speed;
-        pub_drive_->publish(drive_msg);
+        // 2. [핵심] 다이내믹 감속 로직 (Dynamic Speed Scaling)
+        // 원리: 조향각이 클수록 타이어의 횡방향 힘이 많이 필요하므로, 종방향 속도를 줄여 슬립을 방지함.
 
+        // 최대 조향각(0.4189 rad) 대비 현재 조향각의 비율 (0.0 ~ 1.0)
+        double steering_ratio = std::abs(input.delta) / 0.4189; 
+        if (steering_ratio > 1.0) steering_ratio = 1.0; // 안전장치 (1.0 초과 방지)
+
+        // 조향각에 비례하여 감속 (최대 조향 시 설정 속도의 40%로 주행)
+        // 0.6이라는 계수는 "감속 강도"입니다. (클수록 코너에서 더 느리게 감)
+        double dynamic_speed = target_speed_ * (1.0 - 0.6 * steering_ratio); 
+
+        // 3. 최소 속도 보장 (너무 느려서 멈추는 것 방지)
+        // 코너에서도 최소 1.0 m/s 이상은 유지하도록 함
+        dynamic_speed = std::max(dynamic_speed, 2.0);
+
+        // 4. 최종 속도 명령 인가
+        drive_msg.drive.speed = dynamic_speed;
+
+        pub_drive_->publish(drive_msg);
+        auto local_pred_traj = solver_.getPredictedTrajectory();
         // 5. 시각화 (Local 예측 경로를 다시 Global로 변환해서 보여줌)
         nav_msgs::msg::Path pred_path_msg;
         pred_path_msg.header.stamp = this->now();

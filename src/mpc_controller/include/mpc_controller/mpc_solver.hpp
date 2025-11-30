@@ -1,60 +1,73 @@
-#ifndef MPC_SOLVER_HPP
-#define MPC_SOLVER_HPP
+#ifndef MPC_CONTROLLER_MPC_SOLVER_HPP_
+#define MPC_CONTROLLER_MPC_SOLVER_HPP_
 
-#include <Eigen/Dense>
-#include <OsqpEigen/OsqpEigen.h>
-#include <vector>
 #include "mpc_controller/dynamic_model.hpp"
+#include "OsqpEigen/OsqpEigen.h"
+#include <Eigen/Dense>
+#include <vector>
 
 namespace mpc_controller
 {
+
+// [추가] 장애물 구조체
+struct Obstacle {
+    double x;
+    double y;
+    double r; // 반지름 (Safety Margin 포함)
+};
 
 class MPCSolver {
 public:
     MPCSolver();
     ~MPCSolver();
 
-    // 초기화: 예측 구간(Horizon)과 시간 간격(dt) 설정
     void init(int horizon, double dt);
 
-    // 핵심 함수: 현재 상태와 목표 경로를 받아 최적의 입력을 계산
-    // reference_trajectory: 앞으로 N스텝 동안의 목표 상태들
-    Input solve(const State& current_state, const std::vector<State>& reference_trajectory);
+    // [수정] 장애물 벡터를 인자로 받음
+    Input solve(const State& current_state, 
+                const std::vector<State>& ref_traj,
+                const std::vector<Obstacle>& obstacles = {}); 
 
     std::vector<State> getPredictedTrajectory() const;
+
 private:
-    // MPC 파라미터
-    int N_;          // 예측 구간 (Horizon Length)
-    double dt_;      // 시간 간격
-    
-    // 차원 (State: 6, Input: 2)
-    const int nx_ = 6; 
-    const int nu_ = 2;
-
-    // 가중치 행렬 (Diagonal Matrix)
-    Eigen::DiagonalMatrix<double, 6> Q_; // 상태 오차 가중치
-    Eigen::DiagonalMatrix<double, 2> R_; // 입력 사용량 가중치
-
-    // OSQP Solver 인스턴스
+    DynamicBicycleModel model_;
     OsqpEigen::Solver solver_;
 
-    // 차량 모델 인스턴스
-    DynamicBicycleModel model_;
+    int N_;
+    double dt_;
 
-    // 내부 함수: QP 문제 생성을 위한 행렬 초기화 (Cast to QP form)
-    void castToQPForm(const Eigen::DiagonalMatrix<double, Eigen::Dynamic>& Q,
-                      const Eigen::DiagonalMatrix<double, Eigen::Dynamic>& R,
-                      const State& current_state,
-                      const std::vector<State>& ref_traj,
-                      Eigen::SparseMatrix<double>& hessianMatrix,
-                      Eigen::VectorXd& gradient,
-                      Eigen::SparseMatrix<double>& linearMatrix,
-                      Eigen::VectorXd& lowerBound,
-                      Eigen::VectorXd& upperBound);
+    // 차원 상수
+    const int nx_ = 6; // State: x, y, psi, vx, vy, omega
+    const int nu_ = 2; // Input: delta, acc
+    const int ns_ = 1; // [추가] Slack variable (Soft Constraint용)
+
+    Eigen::DiagonalMatrix<double, Eigen::Dynamic> Q_;
+    Eigen::DiagonalMatrix<double, Eigen::Dynamic> R_;
+    
+    // [추가] Slack 변수 가중치
+    double slack_weight_ = 10000.0; 
 
     std::vector<State> predicted_trajectory_;
+
+    // [추가] 장애물 제약 선형화 헬퍼 함수
+    void getObstacleConstraint(const State& ref_state,
+                               const std::vector<Obstacle>& obstacles,
+                               double& a_x, double& a_y, double& lower_bound);
+
+    // [수정] QP Form 변환 함수 (Obstacles 추가)
+    void castToQPForm(const Eigen::DiagonalMatrix<double, Eigen::Dynamic>& Q,
+                      const Eigen::DiagonalMatrix<double, Eigen::Dynamic>& R,
+                      const State& x0,
+                      const std::vector<State>& ref,
+                      const std::vector<Obstacle>& obstacles,
+                      Eigen::SparseMatrix<double>& P_sparse,
+                      Eigen::VectorXd& q,
+                      Eigen::SparseMatrix<double>& A_sparse,
+                      Eigen::VectorXd& l,
+                      Eigen::VectorXd& u_vec);
 };
 
 } // namespace mpc_controller
 
-#endif // MPC_SOLVER_HPP
+#endif // MPC_CONTROLLER_MPC_SOLVER_HPP_
