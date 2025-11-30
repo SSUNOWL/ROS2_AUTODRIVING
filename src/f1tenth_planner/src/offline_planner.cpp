@@ -12,7 +12,7 @@
 #include <cmath>
 #include <filesystem>
 #include <algorithm>
-
+#include <tf2/LinearMath/Quaternion.h> // [추가] Quaternion 변환용
 using namespace std;
 
 struct Point {
@@ -67,6 +67,9 @@ public:
         // 5. 속도 계산
         vector<double> speeds = generate_velocity_profile(final_path);
 
+
+        vector<double> yaws = calculate_yaw_profile(final_path);
+
         int fixed_points = 0;
         for (auto& p : final_path) {
             int px = (int)((p.x - map_info_.origin_x) / map_info_.resolution);
@@ -84,12 +87,12 @@ public:
         }
 
         // [유지] 최종 결과물 저장
-        save_to_csv(final_path, speeds, "raceline_with_speed.csv");
-        
+        save_to_csv(final_path, speeds, yaws, "raceline_with_yaw.csv");        
         // 6. Rviz 퍼블리시 설정
         path_pub_ = this->create_publisher<nav_msgs::msg::Path>("/plan", 10);
-        generate_path_msg(final_path); 
 
+        generate_path_msg(final_path, yaws);
+        
         timer_ = this->create_wall_timer(
             std::chrono::milliseconds(1000), 
             std::bind(&OfflinePlanner::timer_callback, this)); 
@@ -456,15 +459,54 @@ private:
         return 0.0;
     }
 
-    void save_to_csv(const vector<Point>& path, const vector<double>& speeds, string filename) {
-        ofstream file(filename);
-        file << "# x, y, speed_mps, dist_to_wall\n"; 
+    void save_to_csv(const vector<Point>& path, const vector<double>& speeds, const vector<double>& yaws, string filename) {        ofstream file(filename);
+        file << "# x, y, yaw_rad, speed_mps, dist_to_wall\n";
         for (size_t i = 0; i < path.size(); i++) {
             double dist = get_dist_to_wall(path[i]);
-            file << path[i].x << "," << path[i].y << "," << speeds[i] << "," << dist << "\n";
+            file << path[i].x << "," << path[i].y << "," << yaws[i] << "," << speeds[i] << "," << dist << "\n";        
         }
         file.close();
         RCLCPP_INFO(this->get_logger(), "Saved raceline to %s", filename.c_str());
+    }
+
+    std::vector<double> calculate_yaw_profile(const std::vector<Point>& path) {
+        std::vector<double> yaws;
+        for (size_t i = 0; i < path.size(); ++i) {
+            double dx, dy;
+            if (i < path.size() - 1) {
+                // 다음 점을 보고 각도 계산
+                dx = path[i+1].x - path[i].x;
+                dy = path[i+1].y - path[i].y;
+            } else {
+                // 마지막 점은 이전 점과의 각도 유지 (혹은 루프 트랙이면 첫 점과 연결)
+                dx = path[i].x - path[i-1].x;
+                dy = path[i].y - path[i-1].y;
+            }
+            yaws.push_back(std::atan2(dy, dx));
+        }
+        return yaws;
+    }
+    void generate_path_msg(const vector<Point>& path, const vector<double>& yaws) {
+        stored_path_msg_.poses.clear(); // 초기화
+        stored_path_msg_.header.frame_id = "map";
+        
+        for (size_t i = 0; i < path.size(); i++) {
+            geometry_msgs::msg::PoseStamped pose;
+            pose.pose.position.x = path[i].x;
+            pose.pose.position.y = path[i].y;
+            pose.pose.position.z = 0.0;
+
+            // [핵심] Yaw -> Quaternion 변환
+            tf2::Quaternion q;
+            q.setRPY(0, 0, yaws[i]); // Roll, Pitch, Yaw
+
+            pose.pose.orientation.x = q.x();
+            pose.pose.orientation.y = q.y();
+            pose.pose.orientation.z = q.z();
+            pose.pose.orientation.w = q.w();
+            
+            stored_path_msg_.poses.push_back(pose);
+        }
     }
 };
 
