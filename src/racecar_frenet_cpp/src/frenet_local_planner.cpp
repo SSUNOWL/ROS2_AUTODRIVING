@@ -173,7 +173,7 @@ public:
       std::bind(&FrenetLocalPlanner::odomCallback, this, _1));
 
     scan_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
-      "/scan", 10,
+      "/ego_racecar/scan", 10,
       std::bind(&FrenetLocalPlanner::scanCallback, this, _1));
 
     global_path_sub_ = this->create_subscription<nav_msgs::msg::Path>(
@@ -740,7 +740,7 @@ private:
   double max_speed_;              // [m/s] ROS 파라미터
 
   // Frenet 파라미터 (기본값)
-  double max_accel_        = 2.0;   // [m/ss]
+  double max_accel_        = 4.0;   // [m/ss]
   double max_curvature_    = 1.0;   // [1/m]
   double max_road_width_   = 2.0;   // [m]  ← 회피 위해 늘림
   double d_road_width_res_ = 0.25;  // [m]  ← 더 촘촘하게
