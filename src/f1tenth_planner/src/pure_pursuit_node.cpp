@@ -30,8 +30,8 @@ public:
         this->declare_parameter("lookahead_min", 1.0);
         this->declare_parameter("lookahead_gain", 0.3);
         this->declare_parameter("wheelbase", 0.33);
-
-        // 새 파라미터: Frenet local path 사용 여부 + 토픽 이름
+         this->declare_parameter("max_speed", 8.0);
+        // 파라미터: Frenet local path 사용 여부 + 토픽 이름
         this->declare_parameter("use_frenet_path", false);
         this->declare_parameter("frenet_path_topic", "/frenet_local_plan");
 
@@ -39,6 +39,7 @@ public:
         lookahead_min_ = this->get_parameter("lookahead_min").as_double();
         lookahead_gain_ = this->get_parameter("lookahead_gain").as_double();
         wheelbase_ = this->get_parameter("wheelbase").as_double();
+        max_speed_      = this->get_parameter("max_speed").as_double();
 
         use_frenet_path_ = this->get_parameter("use_frenet_path").as_bool();
         frenet_path_topic_ = this->get_parameter("frenet_path_topic").as_string();
@@ -88,6 +89,7 @@ private:
     double lookahead_min_;
     double lookahead_gain_;
     double wheelbase_;
+    double max_speed_;
 
     bool load_waypoints(string path) {
         ifstream file(path);
@@ -178,19 +180,43 @@ private:
         double dx = target.x - curr_x;
         double dy = target.y - curr_y;
         
-        double local_x = cos(-yaw) * dx - sin(-yaw) * dy;
-        double local_y = sin(-yaw) * dx + cos(-yaw) * dy;
+                double local_x = std::cos(-yaw) * dx - std::sin(-yaw) * dy;
+        double local_y = std::sin(-yaw) * dx + std::cos(-yaw) * dy;
 
-        // (2) 조향각 계산: steering = atan(2 * L * y / l_d^2)
-        double dist_to_target_sq = local_x*local_x + local_y*local_y;
-        double curvature = 2.0 * local_y / dist_to_target_sq;
-        double steering_angle = atan(curvature * wheelbase_);
+        // (2) 조향각 계산: 0 나누기/NaN 완전 방지
+        double dist_to_target_sq = local_x * local_x + local_y * local_y;
+        const double eps = 1e-6;
+
+        double curvature = 0.0;
+        if (dist_to_target_sq > eps) {
+            curvature = 2.0 * local_y / dist_to_target_sq;
+        }
+
+        double steering_angle = std::atan(curvature * wheelbase_);
+
+        // 조향 NaN / Inf 방지
+        if (!std::isfinite(steering_angle)) {
+            steering_angle = 0.0;
+        }
 
         // 5. 메시지 발행
         ackermann_msgs::msg::AckermannDriveStamped drive_msg;
         drive_msg.header = msg->header;
         drive_msg.drive.steering_angle = steering_angle;
-        drive_msg.drive.speed = target.v; // CSV에 적힌 "최적 속도" 사용!
+
+        // 속도 NaN / 음수 방지 + 최대속도 8m/s 로 클램프
+        double v_cmd = target.v;  // Frenet local planner가 z에 넣어둔 속도
+
+        if (!std::isfinite(v_cmd) || v_cmd < 0.0) {
+            v_cmd = 0.0;
+        }
+
+        if (max_speed_ > 0.0) {
+            v_cmd = std::min(v_cmd, max_speed_);
+        }
+
+        drive_msg.drive.speed = v_cmd;
+
         
         drive_pub_->publish(drive_msg);
 

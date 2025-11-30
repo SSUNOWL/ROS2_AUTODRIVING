@@ -350,10 +350,11 @@ private:
     if (!has_odom_ || ref_points_.empty()) return false;
 
     // 장애물 관련 파라미터
-    const double safe_radius    = 0.3;   // 이 안이면 충돌로 간주
-    const double soft_radius    = 1.0;   // 이 안이면 cost 크게
-    const double k_obs          = 5;  // 장애물 cost 가중치
-    const double emergency_dist = 0.9;   // 이 안이면 감속/거의 정지
+    const double safe_radius    = 0.25;   // 이 안이면 충돌로 간주
+    const double soft_radius    = 0.8;   // 이 안이면 cost 크게
+    const double k_obs          = 3.0;  // 장애물 cost 가중치
+    const double emergency_dist = 0.7;   // 이 안이면 강하게 감속
+    const double escape_dist    = 0.4;   // 이 안이면 "탈출 모드"
 
     // 1. 현재 상태 (x,y,yaw,v) → (s, d, s_d, d_d, d_dd)
     const auto & pose = latest_odom_.pose.pose;
@@ -590,6 +591,9 @@ private:
 
     // best path 기준 장애물 최소 거리 다시 계산
     double min_dist_best = std::numeric_limits<double>::infinity();
+    Eigen::Vector2d nearest_obs(0.0, 0.0);
+    bool has_nearest_obs = false;
+
     if (!obstacles_.empty()) {
       for (size_t i = 0; i < best_fp->x.size(); ++i) {
         Eigen::Vector2d p(best_fp->x[i], best_fp->y[i]);
@@ -598,34 +602,86 @@ private:
           double dy = p.y() - obs.y();
           double dist = std::hypot(dx, dy);
           if (dist < min_dist_best) {
-            min_dist_best = dist;
+            min_dist_best   = dist;
+            nearest_obs     = obs;
+            has_nearest_obs = true;
           }
         }
       }
     }
 
-    // 5. 선택된 경로를 Waypoint로 변환 (PP가 사용)
+    // 너무 가까우면 탈출 모드 진입 여부와 탈출 방향 결정
+    bool escape_mode  = false;
+    double escape_side = 0.0;  // +1: 왼쪽으로 피하기, -1: 오른쪽으로 피하기
+
+    if (has_nearest_obs && min_dist_best < escape_dist) {
+      // 차량 기준 좌표계로 변환해서 장애물이 왼쪽/오른쪽 어디에 있는지 판단
+      double dx_o = nearest_obs.x() - x;
+      double dy_o = nearest_obs.y() - y;
+
+      double obs_x_l = std::cos(-yaw) * dx_o - std::sin(-yaw) * dy_o;
+      double obs_y_l = std::sin(-yaw) * dx_o + std::cos(-yaw) * dy_o;
+
+      // 장애물이 왼쪽( y>0 )이면 오른쪽으로 피하고, 오른쪽이면 왼쪽으로 피함
+      escape_side = (obs_y_l >= 0.0) ? -1.0 : 1.0;
+      escape_mode = true;
+    }
+
+        // 5. 선택된 경로를 Waypoint로 변환 (PP가 사용)
     local_wps.clear();
     for (size_t i = 0; i < best_fp->x.size(); ++i) {
       Waypoint wp;
+
+      // 기본 경로 좌표
       wp.x = best_fp->x[i];
       wp.y = best_fp->y[i];
 
-      // 기본 속도
-      double v_cmd = std::min(best_fp->v[i], max_speed_);
+      // --- 탈출 모드일 때는 경로를 옆으로 조금 밀어줌 ---
+      if (escape_mode) {
+        const double d_escape = 0.35;  // 옆으로 35cm 정도 피하기
+        double yaw_i = (i < best_fp->yaw.size()) ? best_fp->yaw[i] : yaw;
+
+        // 경로의 노말 벡터 (좌/우 방향)
+        double nx = -std::sin(yaw_i);
+        double ny =  std::cos(yaw_i);
+
+        wp.x += escape_side * d_escape * nx;
+        wp.y += escape_side * d_escape * ny;
+      }
+
+      // --- 속도 계산 ---
+      double v_cmd = best_fp->v[i];
+
+      // NaN / 음수 속도 방지
+      if (!std::isfinite(v_cmd) || v_cmd < 0.0) {
+        v_cmd = 0.0;
+      }
+
+      // 우선 Frenet 자체 목표 속도 상한
+      v_cmd = std::min(v_cmd, max_speed_);
 
       // 장애물이 너무 가까우면 속도 줄이기
       if (min_dist_best < emergency_dist) {
-        // min_dist_best == safe_radius 일 때 alpha = min_alpha
+        // min_dist_best == safe_radius 일 때 alpha ≈ min_alpha
         // min_dist_best == emergency_dist 일 때 alpha = 1.0
-        double alpha = (min_dist_best - safe_radius) / (emergency_dist - safe_radius);
+        double denom = (emergency_dist - safe_radius);
+        if (denom < 1e-6) {
+          denom = 1e-6;  // 0 나누기 방지
+        }
+        double alpha = (min_dist_best - safe_radius) / denom;
 
-        // 최소 속도 비율 (예: 0.4면 40%까지는 유지)
-        const double min_alpha = 0.6;
+        // 탈출 모드면 더 과감하게 감속
+        const double min_alpha = escape_mode ? 0.3 : 0.6;
         alpha = std::clamp(alpha, min_alpha, 1.0);
 
         v_cmd *= alpha;
-        }
+      }
+
+      // 마지막으로 다시 NaN 방지 + 최종 상한
+      if (!std::isfinite(v_cmd)) {
+        v_cmd = 0.0;
+      }
+      v_cmd = std::min(v_cmd, max_speed_);
 
       wp.v = v_cmd;
       local_wps.push_back(wp);
@@ -688,7 +744,7 @@ private:
   double max_curvature_    = 1.0;   // [1/m]
   double max_road_width_   = 2.0;   // [m]  ← 회피 위해 늘림
   double d_road_width_res_ = 0.25;  // [m]  ← 더 촘촘하게
-  double target_speed_     = 3.0;   // [m/s]
+  double target_speed_     = 6.0;   // [m/s]
   double dt_               = 0.2;   // [s] time step
   double maxt_             = 3.0;   // [s] 최대 planning horizon
   double mint_             = 2.0;   // [s] 최소 planning horizon
