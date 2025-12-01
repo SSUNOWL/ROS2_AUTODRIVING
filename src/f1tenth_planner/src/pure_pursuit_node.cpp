@@ -33,7 +33,7 @@ public:
          this->declare_parameter("max_speed", 8.0);
         // 파라미터: Frenet local path 사용 여부 + 토픽 이름
         this->declare_parameter("use_frenet_path", false);
-        this->declare_parameter("frenet_path_topic", "/frenet_local_plan");
+        this->declare_parameter("frenet_path_topic", "/selected_path");
 
         string csv_path = this->get_parameter("csv_path").as_string();
         lookahead_min_ = this->get_parameter("lookahead_min").as_double();
