@@ -27,10 +27,25 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'use_frenet_path': True,          # True면 토픽을 구독 (CSV 무시)
-                'frenet_path_topic': '/fgm_path', # FGM이 만든 길을 구독
+                'frenet_path_topic': '/selected_path', # FGM이 만든 길을 구독
                 'lookahead_gain': 0.4,
                 'max_speed': 5.0,                 # 최대 속도 제한
                 'wheelbase': 0.33
+            }]
+        ),
+        Node(
+            package='planner_mux',
+            executable='planner_mux_node',
+            name='local_planner_mux',
+            output='screen',
+            parameters=[{
+                'd_min': 0.45,
+                'v_ref': 5.0,
+                'jerk_ref': 5.0,
+                'track_ref': 0.5,
+                'w_speed': 1.0,
+                'w_track': 1.0,
+                'w_comfort': 1.0,
             }]
         )
     ])

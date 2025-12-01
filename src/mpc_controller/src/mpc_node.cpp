@@ -31,7 +31,7 @@ public:
         
         // [수정] Frenet Planner의 로컬 경로 구독
         sub_ref_path_ = this->create_subscription<nav_msgs::msg::Path>(
-            "/fgm_path", 10, std::bind(&MPCNode::pathCallback, this, std::placeholders::_1));
+            "/selected_path", 10, std::bind(&MPCNode::pathCallback, this, std::placeholders::_1));
 
         pub_drive_ = this->create_publisher<ackermann_msgs::msg::AckermannDriveStamped>(
             "/drive", 10);
