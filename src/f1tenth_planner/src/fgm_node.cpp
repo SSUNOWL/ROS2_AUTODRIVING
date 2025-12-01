@@ -39,10 +39,10 @@ public:
         this->declare_parameter("max_lookahead", 3.0);
         this->declare_parameter("lookahead_gain", 0.5);
 
-        // --- [3] 속도 제어 파라미터 (NEW) ---
-        this->declare_parameter("max_speed", 6.0);       // 장애물 없을 때 최대 속도
-        this->declare_parameter("min_speed", 2.5);       // 장애물 앞 최소 속도
-        this->declare_parameter("slow_down_dist", 4.0);  // 감속을 시작할 거리 (m)
+        // --- [3] 속도 제어 파라미터 ---
+        this->declare_parameter("max_speed", 6.0);       
+        this->declare_parameter("min_speed", 2.5);       
+        this->declare_parameter("slow_down_dist", 4.0);  
 
         // 파라미터 변수 매핑
         gap_threshold_ = this->get_parameter("gap_threshold").as_double();
@@ -59,7 +59,6 @@ public:
         double fov_deg = this->get_parameter("fov_angle").as_double();
         fov_rad_ = (fov_deg / 2.0) * (M_PI / 180.0);
 
-        // [NEW] 속도 파라미터 읽기
         max_speed_ = this->get_parameter("max_speed").as_double();
         min_speed_ = this->get_parameter("min_speed").as_double();
         slow_down_dist_ = this->get_parameter("slow_down_dist").as_double();
@@ -79,7 +78,7 @@ public:
 
         path_pub_ = this->create_publisher<nav_msgs::msg::Path>("/fgm_path", 10);
 
-        RCLCPP_INFO(this->get_logger(), "Adaptive Speed FGM Started. Max: %.1f, Min: %.1f", max_speed_, min_speed_);
+        RCLCPP_INFO(this->get_logger(), "FGM Robust Mode Started.");
     }
 
 private:
@@ -98,8 +97,6 @@ private:
     double gap_threshold_, bubble_radius_, fov_rad_;
     double min_plan_dist_, max_plan_dist_, plan_gain_;
     double min_look_, max_look_, look_gain_;
-    
-    // 속도 관련 변수
     double max_speed_, min_speed_, slow_down_dist_;
 
     void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg) {
@@ -118,7 +115,6 @@ private:
         // 2. 가장 가까운 장애물 거리 찾기 (속도 조절용)
         double min_obs_dist = 100.0;
         for (double r : ranges) {
-            // 0.0은 side filter나 fov로 걸러진 값이므로 무시
             if (r > 0.05 && r < min_obs_dist) {
                 min_obs_dist = r;
             }
@@ -127,14 +123,12 @@ private:
         // 3. 목표 속도 계산 (Adaptive Speed Logic)
         double target_speed = max_speed_;
         if (min_obs_dist < slow_down_dist_) {
-            // 거리가 가까울수록 속도를 줄임 (선형 보간)
-            // 거리: bubble_radius ~ slow_down_dist  ==> 속도: min_speed ~ max_speed
             double ratio = (min_obs_dist - bubble_radius_) / (slow_down_dist_ - bubble_radius_);
-            ratio = std::clamp(ratio, 0.0, 1.0); // 0~1 사이로 제한
+            ratio = std::clamp(ratio, 0.0, 1.0);
             target_speed = min_speed_ + (max_speed_ - min_speed_) * ratio;
         }
 
-        // 4. 버블 및 Gap 찾기
+        // 4. [NEW] 동적 버블 및 Gap 찾기
         apply_bubble(ranges, msg->angle_increment);
         vector<Gap> gaps = find_gaps(ranges, msg->angle_min, msg->angle_increment);
         
@@ -143,37 +137,68 @@ private:
         double dyn_lookahead = std::clamp(min_look_ + look_gain_ * current_speed_, min_look_, max_look_);
 
         if (gaps.empty()) {
-            // 비상시: 최저 속도로 직진 시도
-            publish_local_path_as_global(0.0, dyn_plan_dist, min_speed_);
+            // 비상시: 최저 속도로 직진 시도하거나 멈춤
+            publish_local_path_as_global(0.0, dyn_plan_dist, 0.0); // 틈 없으면 정지
             return;
         }
 
-        // 5. 최적 각도 선정
+        // 5. 최적 각도 선정 (안전 로직 추가됨)
         double best_angle = 0.0;
         double min_cost = 1e9;
+        bool valid_gap_found = false;
+
+        // [NEW] 조향각 한계 상수 (약 26도 ~ 30도)
+        const double MAX_STEER_ANGLE = 0.5; 
 
         if (has_global_path_) {
             double global_desired_angle = get_global_goal_angle(dyn_lookahead);
             for (const auto& gap : gaps) {
+                // [NEW] 조향각 한계 필터: 물리적으로 꺾을 수 없는 각도는 무시
+                if (std::abs(gap.center_angle) > MAX_STEER_ANGLE) continue;
+
                 double angle_diff = std::abs(gap.center_angle - global_desired_angle);
                 double width_score = gap.len * 0.1; 
                 double total_cost = angle_diff - width_score;
+                
                 if (total_cost < min_cost) {
                     min_cost = total_cost;
                     best_angle = gap.center_angle;
+                    valid_gap_found = true;
                 }
             }
         } else {
             int max_len = -1;
             for (const auto& gap : gaps) {
+                // [NEW] 조향각 한계 필터
+                if (std::abs(gap.center_angle) > MAX_STEER_ANGLE) continue;
+
                 if (gap.len > max_len) {
                     max_len = gap.len;
                     best_angle = gap.center_angle;
+                    valid_gap_found = true;
                 }
             }
         }
 
-        // 6. 경로 발행 (계산된 target_speed 전달)
+        // 틈은 있지만, 내 조향각으로 갈 수 있는 틈이 없는 경우
+        if (!valid_gap_found) {
+            publish_local_path_as_global(0.0, dyn_plan_dist, 0.0); // 정지
+            return;
+        }
+
+        // [NEW] 경로 유효성 검사 (Path Validation)
+        // 최종 결정된 각도 방향에 장애물이 있는지 한 번 더 확인 (센서 노이즈 대비)
+        int check_idx = static_cast<int>((best_angle - msg->angle_min) / msg->angle_increment);
+        if (check_idx >= 0 && check_idx < (int)ranges.size()) {
+            // 내가 가려는 거리(dyn_plan_dist)보다 장애물이 더 가까이 있다면?
+            // 단, ranges 값이 0.0(필터됨)인 경우는 제외하고 실제 거리값일 때만 체크
+            if (ranges[check_idx] > 0.05 && ranges[check_idx] < dyn_plan_dist) {
+                // 충돌 위험! 속도 0으로 설정하여 급정거 유도
+                target_speed = 0.0;
+            }
+        }
+
+        // 6. 경로 발행
         publish_local_path_as_global(best_angle, dyn_plan_dist, target_speed);
     }
 
@@ -224,13 +249,18 @@ private:
         int closest_idx = -1;
         double min_dist = 100.0;
         for (size_t i = 0; i < ranges.size(); ++i) {
-            if (ranges[i] > 0.0 && ranges[i] < min_dist) { // 0.0 제외
+            if (ranges[i] > 0.0 && ranges[i] < min_dist) {
                 min_dist = ranges[i];
                 closest_idx = i;
             }
         }
         if (closest_idx != -1) {
-            int radius_idx = static_cast<int>(bubble_radius_ / (min_dist * angle_increment));
+            // [NEW] 동적 버블 적용
+            // 속도가 빠르면 버블을 키움: 기본 + (속도 * 0.1)
+            // 예: 5m/s -> 0.45 + 0.5 = 0.95m (상당히 커짐)
+            double dynamic_radius = bubble_radius_ + (std::abs(current_speed_) * 0.1);
+
+            int radius_idx = static_cast<int>(dynamic_radius / (min_dist * angle_increment));
             int start_zero = std::max(0, closest_idx - radius_idx);
             int end_zero = std::min((int)ranges.size() - 1, closest_idx + radius_idx);
             for (int i = start_zero; i <= end_zero; ++i) ranges[i] = 0.0; 
@@ -262,7 +292,6 @@ private:
         return gaps;
     }
 
-    // [수정] target_speed 인자 추가
     void publish_local_path_as_global(double target_angle, double dist, double speed) {
         double local_x = dist * std::cos(target_angle);
         double local_y = dist * std::sin(target_angle);
@@ -295,7 +324,6 @@ private:
             path_msg.poses.push_back(start_pose_global);
         } catch (...) {}
 
-        // 계산된 속도(speed)를 입력
         global_pose.pose.position.z = speed; 
         path_msg.poses.push_back(global_pose);
 
