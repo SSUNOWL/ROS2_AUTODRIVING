@@ -11,6 +11,7 @@
 #include <cmath>
 #include <algorithm>
 #include <chrono>
+#include <numeric>
 
 using namespace std;
 using namespace std::chrono_literals;
@@ -20,29 +21,30 @@ struct Gap {
     int end_idx;
     int len;
     double center_angle;
+    double avg_depth; 
 };
 
 class FGMNode : public rclcpp::Node {
 public:
     FGMNode() : Node("fgm_node") {
         // --- [1] 안전 및 인식 파라미터 ---
-        this->declare_parameter("gap_threshold", 1.2);
-        this->declare_parameter("bubble_radius", 0.45);
+        this->declare_parameter("gap_threshold", 1.2); 
+        this->declare_parameter("bubble_radius", 0.5); 
         this->declare_parameter("fov_angle", 180.0);
         
-        // --- [2] 경로 생성 파라미터 (Planning) ---
+        // --- [2] 경로 생성 파라미터 ---
         this->declare_parameter("min_planning_dist", 2.0);
-        this->declare_parameter("max_planning_dist", 4.0);
-        this->declare_parameter("planning_gain", 0.7);
+        this->declare_parameter("max_planning_dist", 5.0);
+        this->declare_parameter("planning_gain", 1.0); 
         
         this->declare_parameter("min_lookahead", 1.5);
-        this->declare_parameter("max_lookahead", 3.0);
-        this->declare_parameter("lookahead_gain", 0.5);
+        this->declare_parameter("max_lookahead", 3.5);
+        this->declare_parameter("lookahead_gain", 0.6);
 
         // --- [3] 속도 제어 파라미터 ---
         this->declare_parameter("max_speed", 6.0);       
-        this->declare_parameter("min_speed", 2.5);       
-        this->declare_parameter("slow_down_dist", 4.0);  
+        this->declare_parameter("min_speed", 2.0);       
+        this->declare_parameter("slow_down_dist", 2.5);
 
         // 파라미터 변수 매핑
         gap_threshold_ = this->get_parameter("gap_threshold").as_double();
@@ -78,7 +80,7 @@ public:
 
         path_pub_ = this->create_publisher<nav_msgs::msg::Path>("/fgm_path", 10);
 
-        RCLCPP_INFO(this->get_logger(), "FGM Robust Mode Started.");
+        RCLCPP_INFO(this->get_logger(), "FGM Curve Mode Started.");
     }
 
 private:
@@ -93,6 +95,8 @@ private:
     nav_msgs::msg::Path global_path_;
     bool has_global_path_ = false;
     double current_speed_ = 0.0;
+    
+    double last_best_angle_ = 0.0; 
 
     double gap_threshold_, bubble_radius_, fov_rad_;
     double min_plan_dist_, max_plan_dist_, plan_gain_;
@@ -109,97 +113,137 @@ private:
     }
 
     void scan_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
-        // 1. 라이다 데이터 정리 (Side Filter 포함)
         vector<double> ranges = clean_ranges(msg);
 
-        // 2. 가장 가까운 장애물 거리 찾기 (속도 조절용)
-        double min_obs_dist = 100.0;
-        for (double r : ranges) {
-            if (r > 0.05 && r < min_obs_dist) {
-                min_obs_dist = r;
+        // 2. 속도 제어 (이전과 동일)
+        double front_min_dist = 100.0;
+        double speed_check_fov = 30.0 * (M_PI / 180.0);
+        for (size_t i = 0; i < ranges.size(); ++i) {
+            double angle = msg->angle_min + i * msg->angle_increment;
+            if (std::abs(angle) < speed_check_fov) { 
+                if (ranges[i] > 0.05 && ranges[i] < front_min_dist) front_min_dist = ranges[i];
             }
         }
-
-        // 3. 목표 속도 계산 (Adaptive Speed Logic)
         double target_speed = max_speed_;
-        if (min_obs_dist < slow_down_dist_) {
-            double ratio = (min_obs_dist - bubble_radius_) / (slow_down_dist_ - bubble_radius_);
+        if (front_min_dist < slow_down_dist_) {
+            double ratio = (front_min_dist - bubble_radius_) / (slow_down_dist_ - bubble_radius_);
             ratio = std::clamp(ratio, 0.0, 1.0);
-            target_speed = min_speed_ + (max_speed_ - min_speed_) * ratio;
+            target_speed = min_speed_ + (max_speed_ - min_speed_) * (ratio * ratio);
         }
 
-        // 4. [NEW] 동적 버블 및 Gap 찾기
+        // 3. Gap 찾기
         apply_bubble(ranges, msg->angle_increment);
         vector<Gap> gaps = find_gaps(ranges, msg->angle_min, msg->angle_increment);
         
-        // 동적 파라미터 계산
         double dyn_plan_dist = std::clamp(min_plan_dist_ + plan_gain_ * current_speed_, min_plan_dist_, max_plan_dist_);
         double dyn_lookahead = std::clamp(min_look_ + look_gain_ * current_speed_, min_look_, max_look_);
 
         if (gaps.empty()) {
-            // 비상시: 최저 속도로 직진 시도하거나 멈춤
-            publish_local_path_as_global(0.0, dyn_plan_dist, 0.0); // 틈 없으면 정지
+            publish_curved_path(last_best_angle_ * 0.5, 1.5, 1.0); 
             return;
         }
 
-        // 5. 최적 각도 선정 (안전 로직 추가됨)
+        // 4. 최적 Gap 선정 (Wall Margin 적용)
         double best_angle = 0.0;
-        double min_cost = 1e9;
+        double max_score = -1e9;
         bool valid_gap_found = false;
 
-        // [NEW] 조향각 한계 상수 (약 26도 ~ 30도)
-        const double MAX_STEER_ANGLE = 0.5; 
-
+        double global_desired_angle = 0.0;
         if (has_global_path_) {
-            double global_desired_angle = get_global_goal_angle(dyn_lookahead);
-            for (const auto& gap : gaps) {
-                // [NEW] 조향각 한계 필터: 물리적으로 꺾을 수 없는 각도는 무시
-                if (std::abs(gap.center_angle) > MAX_STEER_ANGLE) continue;
+            global_desired_angle = get_global_goal_angle(dyn_lookahead);
+        }
 
-                double angle_diff = std::abs(gap.center_angle - global_desired_angle);
-                double width_score = gap.len * 0.1; 
-                double total_cost = angle_diff - width_score;
-                
-                if (total_cost < min_cost) {
-                    min_cost = total_cost;
-                    best_angle = gap.center_angle;
-                    valid_gap_found = true;
+        const double HYSTERESIS_BONUS = 2.0; 
+        const double CHANGE_THRESHOLD = 0.3; 
+        
+        // [NEW] 벽 이격 마진 (라디안 단위)
+        // 약 0.25 rad = 14.3도. 이 값만큼 벽에서 떨어집니다.
+        // 차폭을 고려하여 충분히 줘야 합니다.
+        const double WALL_MARGIN_ANGLE = 0.3; 
+
+        for (const auto& gap : gaps) {
+            // Gap의 실제 물리적 시작/끝 각도
+            double gap_start_angle = msg->angle_min + gap.start_idx * msg->angle_increment;
+            double gap_end_angle = msg->angle_min + gap.end_idx * msg->angle_increment;
+
+            // [핵심] 안전 구간 계산 (Gap 양 끝에서 Margin만큼 깎아냄)
+            double safe_min_angle = gap_start_angle + WALL_MARGIN_ANGLE;
+            double safe_max_angle = gap_end_angle - WALL_MARGIN_ANGLE;
+
+            // 마진을 깎았더니 남는 공간이 없다면? (너무 좁은 틈) -> 건너뜀
+            if (safe_min_angle >= safe_max_angle) continue;
+
+            // 1. 일단 Gap의 중앙을 타겟으로 잡음
+            double target_angle_in_gap = (safe_min_angle + safe_max_angle) / 2.0;
+
+            // 2. Global Path 수렴 로직 (Bias)
+            if (has_global_path_) {
+                // Global Path가 안전 구간(Safe Zone) 안에 있다면?
+                if (global_desired_angle >= safe_min_angle && global_desired_angle <= safe_max_angle) {
+                    // 안전하므로 Global Path 방향으로 강하게 당김 (80% 반영)
+                    target_angle_in_gap = (target_angle_in_gap * 0.2) + (global_desired_angle * 0.8);
+                }
+                else if (global_desired_angle < safe_min_angle) {
+                    // Global Path가 오른쪽 벽 너머에 있음 -> 안전 구간의 가장 오른쪽 끝 선택
+                    target_angle_in_gap = safe_min_angle; 
+                }
+                else { // global_desired_angle > safe_max_angle
+                    // Global Path가 왼쪽 벽 너머에 있음 -> 안전 구간의 가장 왼쪽 끝 선택
+                    target_angle_in_gap = safe_max_angle;
                 }
             }
-        } else {
-            int max_len = -1;
-            for (const auto& gap : gaps) {
-                // [NEW] 조향각 한계 필터
-                if (std::abs(gap.center_angle) > MAX_STEER_ANGLE) continue;
 
-                if (gap.len > max_len) {
-                    max_len = gap.len;
-                    best_angle = gap.center_angle;
-                    valid_gap_found = true;
-                }
+            // 점수 계산
+            double width_score = gap.len; 
+            double angle_diff = std::abs(target_angle_in_gap - global_desired_angle);
+            double steer_penalty = std::abs(target_angle_in_gap) * 5.0;
+
+            double score = (width_score * 0.5) - (angle_diff * 4.0) - (steer_penalty * 0.1);
+
+            if (std::abs(target_angle_in_gap - last_best_angle_) < CHANGE_THRESHOLD) {
+                score += HYSTERESIS_BONUS;
+            }
+
+            if (score > max_score) {
+                max_score = score;
+                best_angle = target_angle_in_gap;
+                valid_gap_found = true;
             }
         }
 
-        // 틈은 있지만, 내 조향각으로 갈 수 있는 틈이 없는 경우
         if (!valid_gap_found) {
-            publish_local_path_as_global(0.0, dyn_plan_dist, 0.0); // 정지
-            return;
+             // 마진을 적용했더니 갈 곳이 하나도 없다면? 
+             // 비상 로직: 마진 무시하고 가장 넓은 곳 중앙으로 (긁으면서라도 가야함)
+             int max_len = -1;
+             for(auto &g : gaps) {
+                 if(g.len > max_len) {
+                     max_len = g.len;
+                     best_angle = g.center_angle;
+                 }
+             }
         }
 
-        // [NEW] 경로 유효성 검사 (Path Validation)
-        // 최종 결정된 각도 방향에 장애물이 있는지 한 번 더 확인 (센서 노이즈 대비)
+        // 5. 조향각 평활화
+        double alpha = 0.4; 
+        best_angle = (alpha * best_angle) + ((1.0 - alpha) * last_best_angle_);
+        last_best_angle_ = best_angle;
+
+        // 6. 충돌 방지 및 경로 발행 (동일)
         int check_idx = static_cast<int>((best_angle - msg->angle_min) / msg->angle_increment);
-        if (check_idx >= 0 && check_idx < (int)ranges.size()) {
-            // 내가 가려는 거리(dyn_plan_dist)보다 장애물이 더 가까이 있다면?
-            // 단, ranges 값이 0.0(필터됨)인 경우는 제외하고 실제 거리값일 때만 체크
-            if (ranges[check_idx] > 0.05 && ranges[check_idx] < dyn_plan_dist) {
-                // 충돌 위험! 속도 0으로 설정하여 급정거 유도
-                target_speed = 0.0;
+        int window = 3;
+        double sum_dist = 0; int cnt = 0;
+        for(int k=-window; k<=window; ++k) {
+            int idx = check_idx + k;
+            if(idx >= 0 && idx < (int)ranges.size()) {
+                if(ranges[idx] > 0.1) { sum_dist += ranges[idx]; cnt++; }
             }
         }
+        double avg_dist = (cnt > 0) ? sum_dist/cnt : 0.0;
+        if (cnt > 0 && avg_dist < dyn_plan_dist * 0.7) {
+             target_speed *= 0.5; dyn_plan_dist = avg_dist * 0.8;
+        }
 
-        // 6. 경로 발행
-        publish_local_path_as_global(best_angle, dyn_plan_dist, target_speed);
+        publish_curved_path(best_angle, dyn_plan_dist, target_speed);
     }
 
     double get_global_goal_angle(double lookahead_dist) {
@@ -248,22 +292,23 @@ private:
     void apply_bubble(vector<double>& ranges, double angle_increment) {
         int closest_idx = -1;
         double min_dist = 100.0;
+        
         for (size_t i = 0; i < ranges.size(); ++i) {
-            if (ranges[i] > 0.0 && ranges[i] < min_dist) {
+            if (ranges[i] > 0.05 && ranges[i] < min_dist) {
                 min_dist = ranges[i];
                 closest_idx = i;
             }
         }
-        if (closest_idx != -1) {
-            // [NEW] 동적 버블 적용
-            // 속도가 빠르면 버블을 키움: 기본 + (속도 * 0.1)
-            // 예: 5m/s -> 0.45 + 0.5 = 0.95m (상당히 커짐)
-            double dynamic_radius = bubble_radius_ + (std::abs(current_speed_) * 0.1);
 
+        if (closest_idx != -1) {
+            double dynamic_radius = bubble_radius_ + (std::abs(current_speed_) * 0.1); 
             int radius_idx = static_cast<int>(dynamic_radius / (min_dist * angle_increment));
-            int start_zero = std::max(0, closest_idx - radius_idx);
-            int end_zero = std::min((int)ranges.size() - 1, closest_idx + radius_idx);
-            for (int i = start_zero; i <= end_zero; ++i) ranges[i] = 0.0; 
+            int start_idx = std::max(0, closest_idx - radius_idx);
+            int end_idx = std::min((int)ranges.size() - 1, closest_idx + radius_idx);
+            
+            for (int i = start_idx; i <= end_idx; ++i) {
+                ranges[i] = 0.0; 
+            }
         }
     }
 
@@ -271,61 +316,105 @@ private:
         vector<Gap> gaps;
         int current_len = 0;
         int start_idx = 0;
+        
         for (size_t i = 0; i < ranges.size(); ++i) {
             if (ranges[i] > gap_threshold_) {
                 if (current_len == 0) start_idx = i;
                 current_len++;
             } else {
-                if (current_len > 0) {
-                    Gap gap; gap.start_idx = start_idx; gap.end_idx = i - 1; gap.len = current_len;
+                if (current_len > 5) { 
+                    Gap gap; 
+                    gap.start_idx = start_idx; 
+                    gap.end_idx = i - 1; 
+                    gap.len = current_len;
                     gap.center_angle = angle_min + (start_idx + current_len/2) * angle_inc;
+                    
+                    double sum_depth = 0;
+                    for(int k=start_idx; k<i; k++) sum_depth += ranges[k];
+                    gap.avg_depth = sum_depth / current_len;
+                    
                     gaps.push_back(gap);
                 }
                 current_len = 0;
             }
         }
-        if (current_len > 0) {
-            Gap gap; gap.start_idx = start_idx; gap.end_idx = ranges.size() - 1; gap.len = current_len;
+        if (current_len > 5) {
+            Gap gap; 
+            gap.start_idx = start_idx; 
+            gap.end_idx = ranges.size() - 1; 
+            gap.len = current_len;
             gap.center_angle = angle_min + (start_idx + current_len/2) * angle_inc;
+            
+            double sum_depth = 0;
+            for(size_t k=start_idx; k<ranges.size(); k++) sum_depth += ranges[k];
+            gap.avg_depth = sum_depth / current_len;
+
             gaps.push_back(gap);
         }
         return gaps;
     }
 
-    void publish_local_path_as_global(double target_angle, double dist, double speed) {
-        double local_x = dist * std::cos(target_angle);
-        double local_y = dist * std::sin(target_angle);
-
-        geometry_msgs::msg::PoseStamped local_pose, global_pose;
-        local_pose.header.frame_id = "ego_racecar/base_link"; 
-        local_pose.header.stamp = this->now();
-        local_pose.pose.position.x = local_x;
-        local_pose.pose.position.y = local_y;
-        local_pose.pose.position.z = 0.0;
-        
-        tf2::Quaternion q; q.setRPY(0, 0, target_angle);
-        local_pose.pose.orientation = tf2::toMsg(q);
-
-        try {
-            global_pose = tf_buffer_->transform(local_pose, "map", std::chrono::milliseconds(100));
-        } catch (tf2::TransformException &ex) { return; }
-
+    // [NEW] 곡선 경로 발행 함수 (직선 2점 -> 곡선 20점)
+    void publish_curved_path(double target_angle, double dist, double speed) {
         nav_msgs::msg::Path path_msg;
         path_msg.header.stamp = this->now();
-        path_msg.header.frame_id = "map";
+        path_msg.header.frame_id = "map"; 
 
-        geometry_msgs::msg::PoseStamped start_pose_local, start_pose_global;
-        start_pose_local.header.frame_id = local_pose.header.frame_id;
-        start_pose_local.header.stamp = this->now();
-        start_pose_local.pose.orientation.w = 1.0;
-        
+        // 1. 현재 차량 위치 및 Yaw 구하기
+        geometry_msgs::msg::TransformStamped t;
         try {
-            start_pose_global = tf_buffer_->transform(start_pose_local, "map", std::chrono::milliseconds(100));
-            path_msg.poses.push_back(start_pose_global);
-        } catch (...) {}
+            if (!tf_buffer_->canTransform("map", "ego_racecar/base_link", rclcpp::Time(0))) return;
+            t = tf_buffer_->lookupTransform("map", "ego_racecar/base_link", rclcpp::Time(0));
+        } catch (tf2::TransformException &ex) { return; }
 
-        global_pose.pose.position.z = speed; 
-        path_msg.poses.push_back(global_pose);
+        double car_x = t.transform.translation.x;
+        double car_y = t.transform.translation.y;
+        
+        tf2::Quaternion q_car(t.transform.rotation.x, t.transform.rotation.y, t.transform.rotation.z, t.transform.rotation.w);
+        double roll, pitch, car_yaw;
+        tf2::Matrix3x3(q_car).getRPY(roll, pitch, car_yaw);
+
+        double local_goal_x = dist * std::cos(target_angle);
+        double local_goal_y = dist * std::sin(target_angle);
+
+        // 2. 곡선 보간 (Interpolation) - 20개의 점 생성
+        int num_points = 20;
+        for (int i = 0; i <= num_points; ++i) {
+            double t_ratio = (double)i / num_points;
+            
+            double current_dist = dist * t_ratio;
+            double current_local_angle = target_angle * t_ratio; // 각도를 선형적으로 변화시킴
+
+            // 로컬 곡선 좌표 (회전 성분 + 직선 성분 혼합)
+            double lx = current_dist * std::cos(current_local_angle);
+            double ly = current_dist * std::sin(current_local_angle);
+            
+            // 끝점이 목표점에 정확히 맞도록 직선 보간 성분 섞기 (7:3 비율)
+            double straight_lx = local_goal_x * t_ratio;
+            double straight_ly = local_goal_y * t_ratio;
+            
+            lx = lx * 0.7 + straight_lx * 0.3;
+            ly = ly * 0.7 + straight_ly * 0.3;
+
+            // 로컬 -> 글로벌 좌표 변환
+            double gx = car_x + (lx * std::cos(car_yaw) - ly * std::sin(car_yaw));
+            double gy = car_y + (lx * std::sin(car_yaw) + ly * std::cos(car_yaw));
+
+            geometry_msgs::msg::PoseStamped pose;
+            pose.header.frame_id = "map";
+            pose.header.stamp = this->now();
+            pose.pose.position.x = gx;
+            pose.pose.position.y = gy;
+            pose.pose.position.z = speed; 
+
+            // 경로의 헤딩 계산 (다음 점을 바라보게)
+            double global_heading = car_yaw + current_local_angle;
+            tf2::Quaternion q;
+            q.setRPY(0, 0, global_heading);
+            pose.pose.orientation = tf2::toMsg(q);
+
+            path_msg.poses.push_back(pose);
+        }
 
         path_pub_->publish(path_msg);
     }
@@ -333,15 +422,25 @@ private:
     vector<double> clean_ranges(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
         vector<double> clean;
         clean.reserve(msg->ranges.size());
-        const double MIN_FORWARD_DIST = 0.2; 
+        const double MIN_FORWARD_DIST = 0.1; 
+        
         for (size_t i = 0; i < msg->ranges.size(); ++i) {
             double angle = msg->angle_min + i * msg->angle_increment;
             double r = msg->ranges[i];
-            if (angle < -fov_rad_ || angle > fov_rad_) { clean.push_back(0.0); continue; }
-            if (std::isinf(r) || std::isnan(r) || r > msg->range_max) { clean.push_back(msg->range_max); continue; }
-            double x = r * std::cos(angle);
-            if (x < MIN_FORWARD_DIST) { clean.push_back(0.0); } 
-            else { clean.push_back(r); }
+            
+            if (angle < -fov_rad_ || angle > fov_rad_) { 
+                clean.push_back(0.0); 
+                continue; 
+            }
+            if (std::isinf(r) || std::isnan(r) || r > msg->range_max) { 
+                clean.push_back(msg->range_max); 
+                continue; 
+            }
+            if (r < MIN_FORWARD_DIST) { 
+                clean.push_back(0.0); 
+            } else { 
+                clean.push_back(r); 
+            }
         }
         return clean;
     }
@@ -352,4 +451,4 @@ int main(int argc, char **argv) {
     rclcpp::spin(std::make_shared<FGMNode>());
     rclcpp::shutdown();
     return 0;
-}
+}   
