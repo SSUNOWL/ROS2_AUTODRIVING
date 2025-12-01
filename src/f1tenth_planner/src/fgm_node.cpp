@@ -115,7 +115,7 @@ private:
     void scan_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
         vector<double> ranges = clean_ranges(msg);
 
-        // 2. 속도 제어 (이전과 동일)
+        // 1. 속도 제어
         double front_min_dist = 100.0;
         double speed_check_fov = 30.0 * (M_PI / 180.0);
         for (size_t i = 0; i < ranges.size(); ++i) {
@@ -131,7 +131,7 @@ private:
             target_speed = min_speed_ + (max_speed_ - min_speed_) * (ratio * ratio);
         }
 
-        // 3. Gap 찾기
+        // 2. Bubble & Gap Finding
         apply_bubble(ranges, msg->angle_increment);
         vector<Gap> gaps = find_gaps(ranges, msg->angle_min, msg->angle_increment);
         
@@ -143,7 +143,7 @@ private:
             return;
         }
 
-        // 4. 최적 Gap 선정 (Wall Margin 적용)
+        // 3. 최적 Gap 선정 (Dynamic Wall Clearance 적용)
         double best_angle = 0.0;
         double max_score = -1e9;
         bool valid_gap_found = false;
@@ -156,40 +156,44 @@ private:
         const double HYSTERESIS_BONUS = 2.0; 
         const double CHANGE_THRESHOLD = 0.3; 
         
-        // [NEW] 벽 이격 마진 (라디안 단위)
-        // 약 0.25 rad = 14.3도. 이 값만큼 벽에서 떨어집니다.
-        // 차폭을 고려하여 충분히 줘야 합니다.
-        const double WALL_MARGIN_ANGLE = 0.3; 
+        // [핵심] MUX 통과를 위한 최소 물리적 이격 거리 (미터 단위)
+        // 0.45m가 기준이라면 안전하게 0.50m 이상 확보
+        const double REQUIRED_CLEARANCE = 0.55; 
 
         for (const auto& gap : gaps) {
-            // Gap의 실제 물리적 시작/끝 각도
             double gap_start_angle = msg->angle_min + gap.start_idx * msg->angle_increment;
             double gap_end_angle = msg->angle_min + gap.end_idx * msg->angle_increment;
 
-            // [핵심] 안전 구간 계산 (Gap 양 끝에서 Margin만큼 깎아냄)
-            double safe_min_angle = gap_start_angle + WALL_MARGIN_ANGLE;
-            double safe_max_angle = gap_end_angle - WALL_MARGIN_ANGLE;
+            // Gap의 시작점과 끝점까지의 거리 가져오기 (0.1m 미만이면 0.1로 처리하여 에러 방지)
+            double start_dist = std::max(ranges[gap.start_idx], 0.1);
+            double end_dist   = std::max(ranges[gap.end_idx], 0.1);
 
-            // 마진을 깎았더니 남는 공간이 없다면? (너무 좁은 틈) -> 건너뜀
+            // [핵심 공식] 거리에 따른 각도 마진 계산 (atan(반경 / 거리))
+            // 거리가 가까우면 마진 각도가 커지고, 멀면 작아짐 -> 물리적 거리 0.5m 보장
+            double start_margin = std::atan(REQUIRED_CLEARANCE / start_dist);
+            double end_margin   = std::atan(REQUIRED_CLEARANCE / end_dist);
+
+            // Gap 범위 축소 (Safety Clipping)
+            double safe_min_angle = gap_start_angle + start_margin;
+            double safe_max_angle = gap_end_angle - end_margin;
+
+            // 마진을 뺐더니 갈 곳이 없다면 패스
             if (safe_min_angle >= safe_max_angle) continue;
 
-            // 1. 일단 Gap의 중앙을 타겟으로 잡음
+            // 1. 타겟 후보 선정
             double target_angle_in_gap = (safe_min_angle + safe_max_angle) / 2.0;
 
-            // 2. Global Path 수렴 로직 (Bias)
+            // 2. Global Path 수렴 로직 (Safe Zone 내에서만)
             if (has_global_path_) {
-                // Global Path가 안전 구간(Safe Zone) 안에 있다면?
                 if (global_desired_angle >= safe_min_angle && global_desired_angle <= safe_max_angle) {
-                    // 안전하므로 Global Path 방향으로 강하게 당김 (80% 반영)
-                    target_angle_in_gap = (target_angle_in_gap * 0.2) + (global_desired_angle * 0.8);
+                    // 안전 구간 안에 있다면 Global Path 방향으로 강하게 당김
+                    target_angle_in_gap = (target_angle_in_gap * 0.3) + (global_desired_angle * 0.7);
                 }
                 else if (global_desired_angle < safe_min_angle) {
-                    // Global Path가 오른쪽 벽 너머에 있음 -> 안전 구간의 가장 오른쪽 끝 선택
-                    target_angle_in_gap = safe_min_angle; 
+                    target_angle_in_gap = safe_min_angle; // 오른쪽 안전 경계선
                 }
                 else { // global_desired_angle > safe_max_angle
-                    // Global Path가 왼쪽 벽 너머에 있음 -> 안전 구간의 가장 왼쪽 끝 선택
-                    target_angle_in_gap = safe_max_angle;
+                    target_angle_in_gap = safe_max_angle; // 왼쪽 안전 경계선
                 }
             }
 
@@ -198,7 +202,8 @@ private:
             double angle_diff = std::abs(target_angle_in_gap - global_desired_angle);
             double steer_penalty = std::abs(target_angle_in_gap) * 5.0;
 
-            double score = (width_score * 0.5) - (angle_diff * 4.0) - (steer_penalty * 0.1);
+            // Global Path 가중치를 높여서 MUX가 좋아하는 경로(전역 경로와 유사한 경로) 선호 유도
+            double score = (width_score * 0.5) - (angle_diff * 5.0) - (steer_penalty * 0.1);
 
             if (std::abs(target_angle_in_gap - last_best_angle_) < CHANGE_THRESHOLD) {
                 score += HYSTERESIS_BONUS;
@@ -212,8 +217,7 @@ private:
         }
 
         if (!valid_gap_found) {
-             // 마진을 적용했더니 갈 곳이 하나도 없다면? 
-             // 비상 로직: 마진 무시하고 가장 넓은 곳 중앙으로 (긁으면서라도 가야함)
+             // 안전 마진 때문에 갈 곳이 없다면 -> 비상 모드: 그냥 제일 넓은 곳 중앙으로
              int max_len = -1;
              for(auto &g : gaps) {
                  if(g.len > max_len) {
@@ -223,12 +227,12 @@ private:
              }
         }
 
-        // 5. 조향각 평활화
+        // 평활화
         double alpha = 0.4; 
         best_angle = (alpha * best_angle) + ((1.0 - alpha) * last_best_angle_);
         last_best_angle_ = best_angle;
 
-        // 6. 충돌 방지 및 경로 발행 (동일)
+        // 충돌 체크
         int check_idx = static_cast<int>((best_angle - msg->angle_min) / msg->angle_increment);
         int window = 3;
         double sum_dist = 0; int cnt = 0;
