@@ -1,3 +1,12 @@
+<최단 시간 레이싱>
+ros2 launch planner_mux time_trial.launch.py
+
+
+
+
+
+
+
 실행 전 - f1_sim_ws/src/f1tenth_gym_ros/config/sim.yaml 들어가서
 map_path: "/home/<사용자이름>/f1_sim_ws/src/f1tenth_gym_ros/maps/Spielberg_map"
 <사용자이름> 부분을 내 우분투 아이디로 변경

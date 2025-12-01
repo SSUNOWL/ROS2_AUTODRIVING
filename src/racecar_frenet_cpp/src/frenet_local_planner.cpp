@@ -210,8 +210,8 @@ private:
     global_path_ = *msg;
     preprocessGlobalPath();
     has_global_path_ = true;
-    RCLCPP_INFO(this->get_logger(), "Received global path: %zu poses",
-                global_path_.poses.size());
+    // RCLCPP_INFO(this->get_logger(), "Received global path: %zu poses",
+    //             global_path_.poses.size());
   }
 
   // ---------- 글로벌 Path 전처리 (s 축 추가) ----------
@@ -244,9 +244,9 @@ private:
       prev = p;
     }
 
-    RCLCPP_INFO(this->get_logger(),
-                "Preprocessed global path to %zu ref points (total length = %.2f m)",
-                ref_points_.size(), s_acc);
+    // RCLCPP_INFO(this->get_logger(),
+    //             "Preprocessed global path to %zu ref points (total length = %.2f m)",
+    //             ref_points_.size(), s_acc);
   }
 
   // ---------- (x,y) → (s,d) 변환 ----------

@@ -52,7 +52,6 @@ public:
     max_speed_mux_   = this->declare_parameter("max_speed_mux", 6.0);
     max_dv_step_mux_ = this->declare_parameter("max_dv_step_mux", 1.0);
 
-
     switch_min_interval_ = this->declare_parameter("switch_min_interval", 0.8); // 최소 0.8초 유지
     switch_score_margin_ = this->declare_parameter("switch_score_margin", 0.15); // 점수 0.15 이상 좋아야 갈아탐
 
@@ -87,8 +86,6 @@ public:
 
     current_mode_ = "NONE";
     current_planner_ = "NONE";
-
-    
 
     RCLCPP_INFO(this->get_logger(), "[MUX] started (quiet mode)");
   }
@@ -240,6 +237,29 @@ private:
         current_mode_.c_str(), new_mode.c_str(),
         current_planner_.c_str(), new_planner.c_str());
 
+      // ★ 변경 시에만 두 궤적의 점수 + 구성 요소 로그 출력
+      auto log_metrics = [this](const char* name,
+                                const Metrics& m,
+                                double score) {
+        RCLCPP_INFO(
+          this->get_logger(),
+          "[MUX]  %s | score=%.3f | v=%.2f | jerk=%.3f | track=%.3f | "
+          "min_d=%.3f | risk=%.3f | a_lat=%.3f | dyn_margin=%.3f",
+          name,
+          score,
+          m.avg_speed,
+          m.jerk_cost,
+          m.tracking_error,
+          m.min_obs_dist,
+          m.risk_index,
+          m.max_lat_accel,
+          m.dyn_clear_margin
+        );
+      };
+
+      log_metrics("FRENET", mf, sf);
+      log_metrics("FGM",    mg, sg);
+
       if (planner_changed) {
         last_switch_time_ = now;
       }
@@ -253,7 +273,6 @@ private:
     selected.header.stamp = this->now();
     pub_selected_->publish(selected);
   }
-
 
   bool is_path_safe(const Metrics & m) const {
     bool geom_ok = (m.min_obs_dist >= d_min_);
