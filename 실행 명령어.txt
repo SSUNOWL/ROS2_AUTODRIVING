@@ -117,3 +117,8 @@ ros2 run mpc_controller mpc_node --ros-args -p use_sim_time:=true
 cd ~/f1_sim_ws
 source install/setup.bash
 ros2 run racecar_teleop_cpp opp_teleop 
+
+
+<fgm>
+ros2 run f1tenth_planner fgm_node --ros-args   -p planning_distance:=3.0   -p gap_threshold:=1.2   -p bubble_radius:=0.45   -p fov_angle:=180.0 -p max_speed:=6.0   -p min_speed:=1.0   -p slow_down_dist:=5.0
+
