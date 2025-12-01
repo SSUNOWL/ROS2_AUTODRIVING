@@ -1,4 +1,3 @@
-// 파일명: planner_mux_node.cpp
 #include "rclcpp/rclcpp.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
@@ -33,16 +32,20 @@ public:
   {
     // ------- 파라미터 선언 & 로드 -------
     // 최소 안전거리 [m]
-    d_min_      = this->declare_parameter("d_min", 0.45);   // FGM bubble_radius와 맞춤
+    d_min_      = this->declare_parameter("d_min", 0.45);
     // 정규화 기준 값
-    v_ref_      = this->declare_parameter("v_ref", 5.0);    // 기준 속도
-    jerk_ref_   = this->declare_parameter("jerk_ref", 5.0); // 허용 jerk 크기
-    track_ref_  = this->declare_parameter("track_ref", 0.5);// 허용 추종 오차 [m]
+    v_ref_      = this->declare_parameter("v_ref", 5.0);
+    jerk_ref_   = this->declare_parameter("jerk_ref", 5.0);
+    track_ref_  = this->declare_parameter("track_ref", 0.5);
 
     // 효율 모드 가중치
     w_speed_    = this->declare_parameter("w_speed",   1.0);
     w_track_    = this->declare_parameter("w_track",   1.0);
     w_comfort_  = this->declare_parameter("w_comfort", 1.0);
+
+    // MUX에서 강제할 공통 속도/가속도 제약
+    max_speed_mux_   = this->declare_parameter("max_speed_mux", 6.0);   // [m/s]
+    max_dv_step_mux_ = this->declare_parameter("max_dv_step_mux", 1.0); // 인접 포인트 간 허용 속도 변화
 
     // ------- 구독 설정 -------
     sub_frenet_ = this->create_subscription<nav_msgs::msg::Path>(
@@ -70,8 +73,8 @@ public:
       std::bind(&LocalPlannerMux::control_loop, this));
 
     RCLCPP_INFO(this->get_logger(),
-      "LocalPlannerMux started. d_min=%.2f, v_ref=%.2f",
-      d_min_, v_ref_);
+      "LocalPlannerMux started. d_min=%.2f, v_ref=%.2f, max_speed_mux=%.2f",
+      d_min_, v_ref_, max_speed_mux_);
   }
 
 private:
@@ -109,16 +112,25 @@ private:
   // ===== 메인 루프 =====
   void control_loop()
   {
+    // 필요한 입력들이 다 들어오기 전에는 아무 것도 하지 않음
     if (!has_frenet_ || !has_fgm_ || !has_global_ || !has_scan_ || !has_odom_) {
-      // 필요한 데이터가 다 모일 때까지 대기
       return;
     }
 
-    // 장애물 포인트를 월드 좌표계로 변환 (라이다 프레임 == 차량 바디 프레임 가정)
+    // 1) 원본 path는 그대로 두고, 로컬 복사본을 만든 뒤
+    //    공통 속도/가속도 제약(enforce_speed_profile)을 적용한다.
+    nav_msgs::msg::Path local_frenet = last_frenet_path_;
+    nav_msgs::msg::Path local_fgm    = last_fgm_path_;
+
+    enforce_speed_profile(local_frenet);
+    enforce_speed_profile(local_fgm);
+
+    // 2) 라이다 + 오돔으로 장애물 포인트 집합 생성
     std::vector<Point2D> obs_points = build_obstacle_points(last_scan_, last_odom_);
 
-    Metrics mf = evaluate_path(last_frenet_path_, obs_points);
-    Metrics mg = evaluate_path(last_fgm_path_, obs_points);
+    // 3) 각 경로에 대해 메트릭 계산 (min_obs_dist, avg_speed, jerk, tracking_error)
+    Metrics mf = evaluate_path(local_frenet, obs_points);
+    Metrics mg = evaluate_path(local_fgm, obs_points);
 
     bool frenet_safe = (mf.min_obs_dist >= d_min_);
     bool fgm_safe    = (mg.min_obs_dist >= d_min_);
@@ -126,57 +138,99 @@ private:
     nav_msgs::msg::Path selected;
     bool publish_needed = false;
 
+    // 4) 선택 로직
     if (frenet_safe && fgm_safe) {
       // ===== 정상 모드: 둘 다 최소 안전거리 이상 =====
       double sf = score_normal(mf);
       double sg = score_normal(mg);
 
-      selected = (sf >= sg) ? last_frenet_path_ : last_fgm_path_;
+      selected = (sf >= sg) ? local_frenet : local_fgm;
       publish_needed = true;
 
-      RCLCPP_DEBUG(this->get_logger(),
-        "NORMAL mode: mf(dist=%.2f, v=%.2f, J=%.2f, e=%.2f) "
-        "mg(dist=%.2f, v=%.2f, J=%.2f, e=%.2f) -> %s",
-        mf.min_obs_dist, mf.avg_speed, mf.jerk_cost, mf.tracking_error,
-        mg.min_obs_dist, mg.avg_speed, mg.jerk_cost, mg.tracking_error,
-        (sf >= sg) ? "Frenet" : "FGM");
+      RCLCPP_DEBUG(
+        this->get_logger(),
+        "NORMAL mode:\n"
+        "  Frenet  : dist=%.3f, v=%.3f, J=%.3f, e=%.3f, score=%.3f\n"
+        "  FGM     : dist=%.3f, v=%.3f, J=%.3f, e=%.3f, score=%.3f\n"
+        "  Selected: %s",
+        mf.min_obs_dist, mf.avg_speed, mf.jerk_cost, mf.tracking_error, sf,
+        mg.min_obs_dist, mg.avg_speed, mg.jerk_cost, mg.tracking_error, sg,
+        (sf >= sg) ? "FRENET" : "FGM");
     }
     else {
       // ===== 비상 모드: 한쪽이라도 d_min 미만 =====
       if (frenet_safe && !fgm_safe) {
-        selected = last_frenet_path_;
+        selected = local_frenet;
         publish_needed = true;
-        RCLCPP_WARN(this->get_logger(),
-          "EMERGENCY mode: FGM unsafe (%.2f < %.2f). Use Frenet.",
+
+        RCLCPP_WARN(
+          this->get_logger(),
+          "EMERGENCY mode: FGM unsafe (%.3f < d_min=%.3f). Use FRENET.",
           mg.min_obs_dist, d_min_);
       }
       else if (!frenet_safe && fgm_safe) {
-        selected = last_fgm_path_;
+        selected = local_fgm;
         publish_needed = true;
-        RCLCPP_WARN(this->get_logger(),
-          "EMERGENCY mode: Frenet unsafe (%.2f < %.2f). Use FGM.",
+
+        RCLCPP_WARN(
+          this->get_logger(),
+          "EMERGENCY mode: FRENET unsafe (%.3f < d_min=%.3f). Use FGM.",
           mf.min_obs_dist, d_min_);
       }
       else {
         // 둘 다 d_min 미만이면 그래도 더 멀리 떨어진 쪽 선택
         if (mf.min_obs_dist >= mg.min_obs_dist) {
-          selected = last_frenet_path_;
+          selected = local_frenet;
         } else {
-          selected = last_fgm_path_;
+          selected = local_fgm;
         }
         publish_needed = true;
-        RCLCPP_ERROR(this->get_logger(),
-          "EMERGENCY mode: BOTH unsafe (F=%.2f, G=%.2f, d_min=%.2f). "
-          "Choose path with larger clearance.",
-          mf.min_obs_dist, mg.min_obs_dist, d_min_);
+
+        RCLCPP_ERROR(
+          this->get_logger(),
+          "EMERGENCY mode: BOTH unsafe.\n"
+          "  Frenet min_dist=%.3f, FGM min_dist=%.3f, d_min=%.3f\n"
+          "  Choose path with larger clearance: %s",
+          mf.min_obs_dist, mg.min_obs_dist, d_min_,
+          (mf.min_obs_dist >= mg.min_obs_dist) ? "FRENET" : "FGM");
       }
     }
 
+    // 5) 최종 선택된 경로 publish
     if (publish_needed) {
       selected.header.stamp = this->now();
       pub_selected_->publish(selected);
     }
   }
+
+  // ===== 속도를 MUX가 직접 목표치까지 끌어올리는 Boost 모드 =====
+void enforce_speed_profile(nav_msgs::msg::Path & path)
+{
+    if (path.poses.empty()) return;
+
+    double prev_v = 0.0;
+    for (size_t i = 0; i < path.poses.size(); i++)
+    {
+        double v = path.poses[i].pose.position.z;
+        if (!std::isfinite(v)) v = 0.0;
+
+        // =========================
+        // ★ Boost Logic 핵심
+        // 목표속도(max_speed_mux_)가 더 크면 → MUX가 속도를 끌어올림
+        // =========================
+        if (v < max_speed_mux_) {
+            v = prev_v + max_dv_step_mux_;        // 한 스텝에 올릴 수 있는 양
+            v = std::min(v, max_speed_mux_);      // 목표속도 이상 금지
+        }
+
+        // 안전장치 (절대 범위)
+        v = std::max(0.0, std::min(max_speed_mux_, v));
+
+        path.poses[i].pose.position.z = v;
+        prev_v = v;
+    }
+}
+
 
   // ===== 경로 평가 함수들 =====
   Metrics evaluate_path(const nav_msgs::msg::Path & path,
@@ -203,7 +257,7 @@ private:
   double compute_jerk_cost(const nav_msgs::msg::Path & path)
   {
     size_t n = path.poses.size();
-    if (n < 3) return jerk_ref_; // 너무 짧으면 벌점
+    if (n < 3) return jerk_ref_; // 너무 짧으면 벌점 비슷하게
 
     std::vector<double> v(n);
     for (size_t i = 0; i < n; ++i) {
@@ -361,6 +415,9 @@ private:
   double w_speed_;
   double w_track_;
   double w_comfort_;
+
+  double max_speed_mux_;
+  double max_dv_step_mux_;
 };
 
 int main(int argc, char * argv[])
