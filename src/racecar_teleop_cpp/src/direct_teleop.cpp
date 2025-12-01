@@ -49,7 +49,7 @@ public:
         
         // 2. 실제 속도/각도 추정을 위한 서브스크라이버
         sub_odom_ = this->create_subscription<nav_msgs::msg::Odometry>(
-            "/ego_racecR/odom", 10, 
+            "/ego_racecar/odom", 10, 
             std::bind(&DirectTeleop::odom_callback, this, std::placeholders::_1));
 
         target_speed_ = 0.0;
