@@ -12,13 +12,16 @@ def generate_launch_description():
     # === Frenet 파라미터 (Launch 인자) ===
     max_speed_arg      = DeclareLaunchArgument(
         'max_speed', default_value='5.0', description='Frenet max speed [m/s]')
+    # [추가됨] 목표 속도 인자
+    target_speed_arg   = DeclareLaunchArgument(
+        'target_speed', default_value='5.0', description='Frenet target speed [m/s]')
     max_accel_arg      = DeclareLaunchArgument(
         'max_accel', default_value='4.0', description='Frenet max accel [m/s^2]')
     max_curvature_arg  = DeclareLaunchArgument(
         'max_curvature', default_value='1.0', description='Frenet max curvature [1/m]')
     s_horizon_arg      = DeclareLaunchArgument(
         's_horizon', default_value='15.0', description='Planning horizon length (if used)')
-
+    
     # === Pure Pursuit 파라미터 (Launch 인자) ===
     pp_max_speed_arg = DeclareLaunchArgument(
         'pp_max_speed', default_value='4.0', description='Pure Pursuit max speed [m/s]')
@@ -38,6 +41,7 @@ def generate_launch_description():
 
     # === LaunchConfiguration 객체 ===
     max_speed      = LaunchConfiguration('max_speed')
+    target_speed   = LaunchConfiguration('target_speed') # [추가됨]
     max_accel      = LaunchConfiguration('max_accel')
     max_curvature  = LaunchConfiguration('max_curvature')
     s_horizon      = LaunchConfiguration('s_horizon')
@@ -59,9 +63,9 @@ def generate_launch_description():
             os.path.join(package_share_directory, 'config', 'params.yaml'),
             {
                 'max_speed': max_speed,
+                'target_speed': target_speed, # [추가됨] 파라미터 전달
                 'max_accel': max_accel,
                 'max_curvature': max_curvature,
-                # 실제 코드에서 쓰는 이름이 있으면 s_horizon로 같이 넘겨줌
                 's_horizon': s_horizon,
             }
         ],
@@ -78,7 +82,7 @@ def generate_launch_description():
                 'csv_path': pp_csv_path,
                 'lookahead_min': pp_lookahead_min,
                 'lookahead_gain': pp_lookahead_gain,
-                'wheelbase': 0.33,      # 자주 안 바꿀 거면 launch에서 고정해도 됨
+                'wheelbase': 0.33,
                 'max_speed': pp_max_speed,
                 'use_frenet_path': pp_use_frenet_path,
                 'frenet_path_topic': pp_frenet_topic,
@@ -89,6 +93,7 @@ def generate_launch_description():
     return LaunchDescription([
         # Declare all args
         max_speed_arg,
+        target_speed_arg, # [추가됨]
         max_accel_arg,
         max_curvature_arg,
         s_horizon_arg,

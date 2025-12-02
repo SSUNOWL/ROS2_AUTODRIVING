@@ -9,6 +9,8 @@
 #include <iomanip>
 #include <cmath>
 #include <chrono>
+#include <cstdio> // std::rename 사용을 위해 추가
+#include <sstream> // 문자열 조합을 위해 추가
 
 class RunLogger : public rclcpp::Node
 {
@@ -22,7 +24,7 @@ public:
         collision_topic_ = this->declare_parameter<std::string>("collision_topic", "/collision");
         this->declare_parameter("goal_tolerance", 0.5); 
 
-        // 파일 이름 생성
+        // 파일 이름 생성 (Timestamp 포함)
         auto now = std::chrono::system_clock::now();
         std::time_t now_c = std::chrono::system_clock::to_time_t(now);
 
@@ -30,14 +32,15 @@ public:
         std::strftime(buf, sizeof(buf), "%Y%m%d_%H%M%S", std::localtime(&now_c));
         std::string ts(buf);
 
-        std::string filename = output_dir_ + "/" + scenario_name_ + "_" +
+        // [수정] 나중에 이름을 바꾸기 위해 멤버 변수에 저장
+        log_filename_ = output_dir_ + "/" + scenario_name_ + "_" +
                                planner_mode_ + "_" + ts + ".csv";
 
-        ofs_.open(filename);
+        ofs_.open(log_filename_);
         if (!ofs_.is_open()) {
-            RCLCPP_ERROR(this->get_logger(), "Failed to open log file: %s", filename.c_str());
+            RCLCPP_ERROR(this->get_logger(), "Failed to open log file: %s", log_filename_.c_str());
         } else {
-            RCLCPP_INFO(this->get_logger(), "Logging to %s (Waiting for start...)", filename.c_str());
+            RCLCPP_INFO(this->get_logger(), "Logging to %s (Waiting for start...)", log_filename_.c_str());
             ofs_ << "t,x,y,yaw,speed,yaw_rate,a_lat,collision,timer_state,elapsed_time\n";
         }
 
@@ -80,6 +83,7 @@ public:
     ~RunLogger()
     {
         summarize();
+        // summarize에서 파일을 닫으므로 여기서는 중복 닫기 방지 체크
         if (ofs_.is_open()) {
             ofs_.close();
         }
@@ -162,7 +166,7 @@ private:
             start_time_ = t;
             last_time_ = t;
         }
-        // [수정] 사용하지 않는 변수 dt 제거
+        
         last_time_ = t;
         double rel_t = t - start_time_;
 
@@ -180,17 +184,14 @@ private:
         double x = msg->pose.pose.position.x;
         double y = msg->pose.pose.position.y;
 
-        // [수정됨] 항상 상태 체크를 수행해야 출발(IDLE->RUNNING)을 감지할 수 있음
         if (timer_state_ == IDLE || timer_state_ == RUNNING) {
             this->checkGoalReach(x, y, speed);
         }
 
-        // 상태 체크 후 경과 시간 계산
         double elapsed = 0.0;
         if (timer_state_ == RUNNING) {
             elapsed = (this->get_clock()->now() - timer_start_time_).seconds();
             
-            // 통계 업데이트 (주행 중에만)
             if (speed > max_speed_) max_speed_ = speed;
             if (std::fabs(a_lat) > max_a_lat_) max_a_lat_ = std::fabs(a_lat);
             if (!std::isnan(last_x_)) {
@@ -204,8 +205,6 @@ private:
         last_x_ = x;
         last_y_ = y;
 
-        // [요청 반영] 타이머가 IDLE이 아닐 때만 (RUNNING 이거나 FINISHED 직후) 로그 저장
-        // 이렇게 하면 출발 대기 중(IDLE) 데이터는 csv에 남지 않습니다.
         if (ofs_.is_open() && timer_state_ != IDLE) {
             ofs_ << std::fixed << std::setprecision(4)
                  << rel_t << ","
@@ -231,7 +230,6 @@ private:
         switch (timer_state_)
         {
             case IDLE:
-                // 출발 감지: 출발점에서 2m 이내에 있다가 속도가 0.1m/s 이상 붙으면 시작
                 if (dist_to_start < 2.0 && std::abs(speed) > 0.1)
                 {
                     timer_start_time_ = this->get_clock()->now();
@@ -294,7 +292,6 @@ private:
 
         RCLCPP_INFO(this->get_logger(), "===== RUN SUMMARY (%s) =====", shutdown_reason_.c_str());
         RCLCPP_INFO(this->get_logger(), "Result State: %s", (timer_state_ == FINISHED) ? "SUCCESS" : "FAIL/INCOMPLETE");
-        // [수정] 사용하지 않던 total_time과 invalid_run 변수를 출력에 사용
         RCLCPP_INFO(this->get_logger(), "Total Logged Time: %.3f s", total_time);
         
         if (timer_state_ == FINISHED) {
@@ -307,12 +304,44 @@ private:
         RCLCPP_INFO(this->get_logger(), "Collision: %d", collision_count_);
         RCLCPP_INFO(this->get_logger(), "Invalid Run (Stuck?): %s", invalid_run ? "YES" : "NO");
         RCLCPP_INFO(this->get_logger(), "======================================");
+
+        // [추가됨] 파일 이름 변경 로직
+        // 파일을 안전하게 닫고 나서 이름을 변경해야 합니다.
+        if (ofs_.is_open()) {
+            ofs_.close();
+        }
+
+        // 완주에 성공했을 경우에만 파일 이름에 시간 추가
+        if (timer_state_ == FINISHED) {
+            double run_time = (timer_goal_time_ - timer_start_time_).seconds();
+            
+            // 새 파일 이름 만들기: .csv 확장자를 찾아서 그 앞에 시간을 삽입
+            std::string new_filename = log_filename_;
+            size_t ext_pos = new_filename.find_last_of(".");
+            
+            std::stringstream ss;
+            ss << std::fixed << std::setprecision(2) << "_time_" << run_time << "s";
+            
+            if (ext_pos != std::string::npos) {
+                new_filename.insert(ext_pos, ss.str());
+            } else {
+                new_filename += ss.str(); // 확장자가 없으면 그냥 뒤에 붙임
+            }
+
+            // 파일 이름 변경 (rename)
+            if (std::rename(log_filename_.c_str(), new_filename.c_str()) == 0) {
+                RCLCPP_INFO(this->get_logger(), "Log file renamed to include lap time: %s", new_filename.c_str());
+            } else {
+                RCLCPP_ERROR(this->get_logger(), "Failed to rename log file.");
+            }
+        }
     }
 
     std::string output_dir_;
     std::string scenario_name_;
     std::string planner_mode_;
     std::string collision_topic_;
+    std::string log_filename_; // [추가] 초기 파일명 저장용
 
     std::ofstream ofs_;
     double start_time_, last_time_;

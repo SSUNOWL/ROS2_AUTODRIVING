@@ -1,0 +1,38 @@
+지금 할려고 하는거
+가중치 튜닝 기준을 찾아보자
+-> 점수를 매겨서 머신러닝 떄려서 답 찾을거임
+
+목표설정: 애초에 frenet을 레이싱용, fgm을 장애물회피용으로 설정함
+-> frenet은 비교적 고속, fgm은 저속이어도 됨
+(실제로 어케될지는 모르겠음)
+
+->머신러닝 할라면 데이터가 많이 필요함
+당장 파라미터 튜닝도 마찬가지임
+1. frenet 튜닝 with raceline 
+2. fgm 튜닝
+3. mux 점수 내기 -> 4가지의 시나리오 마다 점수를 내고
+모든 점수에서 좋은 성적을 내는 mux 가중치를 찾아보자
+
+https://chatgpt.com/share/692f495f-feb4-800c-af5c-7a5a867caa4b
+이거 읽어보면될듯
+
+현재 상황은 frenet parameter 세팅 끝나서
+frenet_local_planner/launch/frenet_with_pp_profile.launch.py
+여기다가 넣어놈 (프로필에 따라다르다)
+
+그리고 튜닝하는 과정은
+/frenet_local_planner/tuning.txt 에다가 다 넣어둠
+
+-> https://chatgpt.com/g/g-p-692dc4babac48191a370a97213b7a956-jayuljuhaeng/c/692f5046-dfc0-8321-8f24-769df2480e12
+내일 오전에 자율주행 하고싶으면 이거하셈
+
+frenet 튜닝할때 사용한 명령어
+(지도켜기)
+ros2 launch f1tenth_gym_ros map_gym_bridge.py   map_name:=Spielberg_map   num_agent:=1
+(/plan 발행)
+ros2 run racecar_experiments static_path_publisher   --ros-args -p csv_path:="$(pwd)/raceline_with_yaw.csv"
+(frenet with pp실행)
+ros2 launch racecar_frenet_cpp frenet_with_pp.launch.py   max_speed:=7.0 max_accel:=6.0 max_curvature:=0.9 target_speed:=8.0  pp_max_speed:=7.0 pp_use_frenet_path:=true   pp_frenet_path_topic:=/frenet_local_plan
+(logger 실행 + collision ) -> logger가 이제 timer랑 역할이 똑같음
+ros2 launch racecar_experiments experiment_logger.launch.py     scenario_name:=spielberg     planner_mode:=FRENET     output_dir:=$(pwd)/logs     collision_topic:=/experiments/crash_detected
+

@@ -166,7 +166,7 @@ public:
   {
     // ROS 파라미터
     max_speed_ = this->declare_parameter<double>("max_speed", 5.0);
-
+    target_speed_ = this->declare_parameter<double>("target_speed", 5.0);
     // Subscriber
     odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
       "/ego_racecar/odom", 10,
@@ -362,7 +362,7 @@ private:
     // [Soft Constraints] 위반 페널티 가중치 및 하드 컷 팩터 (사용자 요청 반영)
     const double w_v_viol = 5.0;  // 속도 위반 가중치
     const double w_a_viol = 5.0;  // 가속도 위반 가중치
-    const double w_k_viol = 20.0; // 곡률 위반 가중치 (코너링 성능 위해 높게 설정)
+    const double w_k_viol = 30.0; // 곡률 위반 가중치 (코너링 성능 위해 높게 설정)
 
     const double hard_speed_factor = 1.5;     // 1.5배 초과 시 하드 컷
     const double hard_accel_factor = 1.5;
@@ -772,7 +772,7 @@ private:
   double max_curvature_    = 0.8;   // [1/m]
   double max_road_width_   = 2.0;   // [m]  ← 회피 위해 늘림
   double d_road_width_res_ = 0.25;  // [m]  ← 더 촘촘하게
-  double target_speed_     = 4.5;   // [m/s]
+  double target_speed_;  // [m/s]
   double dt_               = 0.2;   // [s] time step
   double maxt_             = 3.0;   // [s] 최대 planning horizon
   double mint_             = 2.0;   // [s] 최소 planning horizon
