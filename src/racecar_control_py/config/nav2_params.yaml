@@ -180,7 +180,7 @@ planner_server:
       
       # 탐색 모델: DUBINS(전진만), REEDS_SHEPP(전진+후진)
       # 일반적인 주행 및 좁은 곳 탈출을 위해 REEDS_SHEPP 권장
-      motion_model_for_search: "REEDS_SHEPP" 
+      motion_model_for_search: "DUBIN" 
 
       # 경로 평활화 (거친 격자 경로를 부드럽게)
       smooth_path: True 

@@ -11,10 +11,10 @@ MPCSolver::MPCSolver() {
 
     // 1. Q (State Weights) - 경로 추종 전용 가중치
     // 장애물 회피 부담이 없으므로 경로 추종(x, y, psi)에 집중합니다.
-    Q_.diagonal() << 2.0, 2.0, 2.0, 0.5, 0.0, 0.0;
-
+    Q_.diagonal() << 5.0, 5.0, 3.0, 1.0, 0.0, 0.0; // [변경] 고속 레이싱을 위해 경로 추종 및 속도 가중치 증가
+    
     // 2. R (Input Weights) - 부드러운 주행 유도
-    R_.diagonal() << 10.0, 1.0; 
+    R_.diagonal() << 5.0, 2.0; // [변경] 조향각 가중치 감소(덜 보수적) 및 가속도 가중치 증가
 }
 
 MPCSolver::~MPCSolver() {}
@@ -235,7 +235,7 @@ void MPCSolver::castToQPForm(const Eigen::DiagonalMatrix<double, Eigen::Dynamic>
     // 2-3. Input Constraints
     int constr_idx = num_eq_constraints;
     double max_steer = 0.4189; 
-    double max_acc = 5.0;
+    double max_acc = 8.0;
 
     for (int k = 0; k < N_; ++k) {
         int col_u = k * dim + nx_;

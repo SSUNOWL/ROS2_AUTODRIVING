@@ -52,6 +52,7 @@ public:
     max_speed_mux_   = this->declare_parameter("max_speed_mux", 6.0);
     max_dv_step_mux_ = this->declare_parameter("max_dv_step_mux", 1.0);
 
+    // 히스테리시스 파라미터
     switch_min_interval_ = this->declare_parameter("switch_min_interval", 0.8); // 최소 0.8초 유지
     switch_score_margin_ = this->declare_parameter("switch_score_margin", 0.15); // 점수 0.15 이상 좋아야 갈아탐
 
@@ -134,18 +135,14 @@ private:
     double sf = score_normal(mf);
     double sg = score_normal(mg);
 
-    // 현재 플래너 점수 (비교용)
-    double score_current = 0.0;
-    if (current_planner_ == "FRENET") score_current = sf;
-    else if (current_planner_ == "FGM") score_current = sg;
-
     // 1단계: "이론적으로" 무엇이 더 좋은지 먼저 결정
-    std::string candidate_mode   = "NONE";
+    std::string candidate_mode    = "NONE";
     std::string candidate_planner = "NONE";
     nav_msgs::msg::Path candidate_path;
     bool candidate_valid = false;
 
     if (frenet_safe && fgm_safe) {
+      // 둘 다 안전할 때: NORMAL 모드, 점수 높은 쪽 선택
       candidate_mode = "NORMAL";
       if (sf >= sg) {
         candidate_planner = "FRENET";
@@ -156,7 +153,9 @@ private:
       }
       candidate_valid = true;
     } else {
+      // 한쪽이라도 unsafe면 EMERGENCY 모드
       candidate_mode = "EMERGENCY";
+
       if (frenet_safe && !fgm_safe) {
         candidate_planner = "FRENET";
         candidate_path = eval_frenet;
@@ -168,15 +167,26 @@ private:
         candidate_valid = true;
       }
       else {
-        // 둘 다 위험하면, 그래도 "조금이라도 나은 쪽" 선택
-        double pf = mf.min_obs_dist + mf.dyn_clear_margin;
-        double pg = mg.min_obs_dist + mg.dyn_clear_margin;
-        if (pf >= pg) {
+        // ★ 둘 다 unsafe인 경우: min_d 절대 우선
+        double df = mf.min_obs_dist;
+        double dg = mg.min_obs_dist;
+
+        const double eps = 1e-3;
+        if (df > dg + eps) {
           candidate_planner = "FRENET";
           candidate_path = eval_frenet;
-        } else {
+        } else if (dg > df + eps) {
           candidate_planner = "FGM";
           candidate_path = eval_fgm;
+        } else {
+          // min_d 거의 비슷하면 점수로 결정
+          if (sf >= sg) {
+            candidate_planner = "FRENET";
+            candidate_path = eval_frenet;
+          } else {
+            candidate_planner = "FGM";
+            candidate_path = eval_fgm;
+          }
         }
         candidate_valid = true;
       }
@@ -213,7 +223,7 @@ private:
     }
 
     // 3단계: 스위치 불허면, 기존 플래너 유지
-    std::string new_mode   = candidate_mode;
+    std::string new_mode    = candidate_mode;
     std::string new_planner = candidate_planner;
     nav_msgs::msg::Path selected = candidate_path;
 
@@ -237,7 +247,7 @@ private:
         current_mode_.c_str(), new_mode.c_str(),
         current_planner_.c_str(), new_planner.c_str());
 
-      // ★ 변경 시에만 두 궤적의 점수 + 구성 요소 로그 출력
+      // 변경 시에만 두 궤적의 점수 + 구성 요소 로그 출력
       auto log_metrics = [this](const char* name,
                                 const Metrics& m,
                                 double score) {
@@ -274,11 +284,11 @@ private:
     pub_selected_->publish(selected);
   }
 
+  // ★ EMERGENCY 기준 현실화: dyn_clear_margin은 안전 판정에 사용하지 않음
   bool is_path_safe(const Metrics & m) const {
     bool geom_ok = (m.min_obs_dist >= d_min_);
-    bool dyn_ok  = (m.dyn_clear_margin >= 0.0);
     bool lat_ok  = (std::fabs(m.max_lat_accel) <= a_lat_max_);
-    return geom_ok && dyn_ok && lat_ok;
+    return geom_ok && lat_ok;
   }
 
   void enforce_speed_profile(nav_msgs::msg::Path & path) {
