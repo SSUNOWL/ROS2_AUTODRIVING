@@ -135,7 +135,8 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 0.35
+        # 🚀 필요 시 팽창 반경 증가 (0.35 -> 0.45)
+        inflation_radius: 0.45 
       always_send_full_costmap: True
 
 global_costmap:
@@ -170,7 +171,8 @@ global_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 0.35
+        # 🚀 필요 시 팽창 반경 증가 (0.35 -> 0.45)
+        inflation_radius: 0.45 
       always_send_full_costmap: True
 
 planner_server:
@@ -182,9 +184,9 @@ planner_server:
       plugin: "nav2_smac_planner/SmacPlannerHybrid"
       
       # F1Tenth 중요 설정
-      minimum_turning_radius: 0.50 # 유지
+      minimum_turning_radius: 0.50 # 컨트롤러와 일치, 곡률 보장
       
-      # 탐색 모델: DUBINS(전진만) - 사용자 요청에 따라 유지
+      # 탐색 모델: DUBINS(전진만) - 유지
       motion_model_for_search: "DUBIN" 
 
       # 경로 평활화 (거친 격자 경로를 부드럽게)
@@ -197,14 +199,11 @@ planner_server:
       analytic_expansion_ratio: 3.5 
       
       # 비용 가중치 (경로의 성향 결정)
-      # Dubin이므로 reverse_penalty는 큰 의미 없지만 유지
       reverse_penalty: 2.0 
-      # 잦은 방향 전환 방지 페널티 유지
       change_penalty: 0.05 
-      # 직진 선호 페널티 유지
       non_straight_penalty: 1.2 
-      # 장애물 근처 페널티를 낮춰 경로가 덜 삐뚤빼뚤하고 맵 중앙을 따르도록 유도 (2.0 -> 1.5)
-      cost_penalty: 1.5 
+      # 🚀 벽에서 멀어지도록 cost_penalty를 대폭 증가 (1.5 -> 4.0)
+      cost_penalty: 4.0 
 
       # 기본 설정
       tolerance: 0.25

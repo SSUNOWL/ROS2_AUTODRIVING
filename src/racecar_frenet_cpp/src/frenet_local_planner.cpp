@@ -741,10 +741,10 @@ private:
 
   // Frenet 파라미터 (기본값)
   double max_accel_        = 4.0;   // [m/ss]
-  double max_curvature_    = 1.0;   // [1/m]
+  double max_curvature_    = 0.8;   // [1/m]
   double max_road_width_   = 2.0;   // [m]  ← 회피 위해 늘림
   double d_road_width_res_ = 0.25;  // [m]  ← 더 촘촘하게
-  double target_speed_     = 6.0;   // [m/s]
+  double target_speed_     = 4.5;   // [m/s]
   double dt_               = 0.2;   // [s] time step
   double maxt_             = 3.0;   // [s] 최대 planning horizon
   double mint_             = 2.0;   // [s] 최소 planning horizon

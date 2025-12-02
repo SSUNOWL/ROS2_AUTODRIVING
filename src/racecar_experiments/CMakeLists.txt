@@ -39,12 +39,22 @@ ament_target_dependencies(path_saver rclcpp nav_msgs)
 add_executable(static_path_publisher src/static_path_publisher.cpp)
 ament_target_dependencies(static_path_publisher rclcpp nav_msgs geometry_msgs)
 
+
+add_executable(run_logger src/run_logger.cpp)
+ament_target_dependencies(run_logger rclcpp nav_msgs geometry_msgs)
+
+
 install(TARGETS
   collision_monitor
   path_timer
   path_saver
   static_path_publisher
+  run_logger
   DESTINATION lib/${PROJECT_NAME})
+
+install(DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}
+)
 
 
 ament_package()
