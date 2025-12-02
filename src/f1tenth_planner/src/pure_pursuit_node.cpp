@@ -6,6 +6,8 @@
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <nav_msgs/msg/path.hpp>
+#include <std_msgs/msg/bool.hpp> 
+
 #include <iostream>
 #include <fstream>
 #include <vector>
@@ -15,23 +17,20 @@
 
 using namespace std;
 
-// 데이터 구조체
 struct Waypoint {
     double x;
     double y;
-    double v; // 속도
+    double v; 
 };
 
 class PurePursuit : public rclcpp::Node {
 public:
-        PurePursuit() : Node("pure_pursuit_node") {
-        // --- 파라미터 설정 ---
+    PurePursuit() : Node("pure_pursuit_node") {
         this->declare_parameter("csv_path", "raceline_with_speed.csv");
         this->declare_parameter("lookahead_min", 1.0);
         this->declare_parameter("lookahead_gain", 0.3);
         this->declare_parameter("wheelbase", 0.33);
-         this->declare_parameter("max_speed", 8.0);
-        // 파라미터: Frenet local path 사용 여부 + 토픽 이름
+        this->declare_parameter("max_speed", 8.0);
         this->declare_parameter("use_frenet_path", false);
         this->declare_parameter("frenet_path_topic", "/selected_path");
 
@@ -45,26 +44,18 @@ public:
         frenet_path_topic_ = this->get_parameter("frenet_path_topic").as_string();
 
         if (!use_frenet_path_) {
-            // 기존 동작: CSV에서 waypoint 로드
             if (!load_waypoints(csv_path)) {
                 RCLCPP_ERROR(this->get_logger(), "Failed to load CSV file!");
                 rclcpp::shutdown();
             }
-            RCLCPP_INFO(this->get_logger(),
-                        "Pure Pursuit using CSV waypoints: %s",
-                        csv_path.c_str());
+            RCLCPP_INFO(this->get_logger(), "Pure Pursuit using CSV waypoints: %s", csv_path.c_str());
         } else {
-            // Frenet local path를 ROS 토픽으로 받음
             path_sub_ = this->create_subscription<nav_msgs::msg::Path>(
                 frenet_path_topic_, 10,
                 std::bind(&PurePursuit::path_callback, this, std::placeholders::_1));
-
-            RCLCPP_INFO(this->get_logger(),
-                        "Pure Pursuit using Frenet path from topic: %s",
-                        frenet_path_topic_.c_str());
+            RCLCPP_INFO(this->get_logger(), "Pure Pursuit using Frenet path from topic: %s", frenet_path_topic_.c_str());
         }
 
-        // 2. Publisher & Subscriber (나머지는 그대로)
         drive_pub_ = this->create_publisher<ackermann_msgs::msg::AckermannDriveStamped>("/drive", 10);
         vis_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("/pure_pursuit_marker", 10);
 
@@ -72,9 +63,20 @@ public:
             "/ego_racecar/odom", 10,
             std::bind(&PurePursuit::odom_callback, this, std::placeholders::_1));
 
-        RCLCPP_INFO(this->get_logger(), "Pure Pursuit Started. Waypoints: %zu", waypoints_.size());
-    }
+        crash_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+            "/experiments/crash_detected", 10,
+            std::bind(&PurePursuit::crash_callback, this, std::placeholders::_1));
 
+        // [추가됨] 목표 도달 신호 구독
+        goal_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+            "/experiments/goal_reached", 10,
+            std::bind(&PurePursuit::goal_callback, this, std::placeholders::_1));
+
+        last_crash_msg_time_ = this->now();
+        is_goal_reached_ = false; // [추가됨] 목표 도달 상태 초기화
+
+        RCLCPP_INFO(this->get_logger(), "Pure Pursuit Started (Auto-Resume & Goal Stop Enabled)."); // 로그 수정
+    }
 
 private:
     vector<Waypoint> waypoints_;
@@ -82,6 +84,13 @@ private:
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr vis_pub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
+    
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr crash_sub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr goal_sub_; // [추가됨]
+
+    bool is_emergency_ = false;
+    bool is_goal_reached_ = false; // [추가됨] 목표 도달 상태 플래그
+    rclcpp::Time last_crash_msg_time_; // 타임아웃용 시간 기록
 
     bool use_frenet_path_;
     std::string frenet_path_topic_;
@@ -91,12 +100,45 @@ private:
     double wheelbase_;
     double max_speed_;
 
+    // [수정됨] 충돌 신호 콜백: False 수신 시 즉시 해제 + Heartbeat
+    void crash_callback(const std_msgs::msg::Bool::SharedPtr msg) {
+        last_crash_msg_time_ = this->now(); // 시간 갱신
+
+        if (msg->data) {
+            if (!is_emergency_) {
+                is_emergency_ = true;
+                RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 2000, 
+                    "EMERGENCY STOP ACTIVATED! (Collision Detected)");
+            }
+        } else {
+            if (is_emergency_) {
+                is_emergency_ = false;
+                RCLCPP_INFO(this->get_logger(), "Collision Cleared. Resuming Pure Pursuit...");
+            }
+        }
+    }
+
+    // [추가됨] 목표 도달 신호 콜백
+    void goal_callback(const std_msgs::msg::Bool::SharedPtr msg) {
+        if (msg->data) {
+            if (!is_goal_reached_) {
+                is_goal_reached_ = true;
+                RCLCPP_INFO(this->get_logger(), "GOAL STOP ACTIVATED! (Goal Reached)");
+            }
+        } else {
+            if (is_goal_reached_) {
+                is_goal_reached_ = false;
+                RCLCPP_INFO(this->get_logger(), "Goal Stop Cleared. Resuming Pure Pursuit...");
+            }
+        }
+    }
+
     bool load_waypoints(string path) {
         ifstream file(path);
         if (!file.is_open()) return false;
 
-        string line;
-        getline(file, line); // 헤더 스킵 (# x, y, speed ...)
+          string line;
+            getline(file, line); 
 
         while (getline(file, line)) {
             stringstream ss(line);
@@ -109,7 +151,7 @@ private:
                 try {
                     wp.x = stod(row[0]);
                     wp.y = stod(row[1]);
-                    wp.v = stod(row[2]); // 3번째 컬럼: 속도
+                    wp.v = stod(row[2]); 
                     waypoints_.push_back(wp);
                 } catch (...) { continue; }
             }
@@ -118,14 +160,32 @@ private:
     }
 
     void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg) {
+        // [NEW] 타임아웃 체크 (충돌 관련만)
+        rclcpp::Time now = this->now();
+        double time_diff = (now - last_crash_msg_time_).seconds();
+
+        if (is_emergency_ && time_diff > 5.0) {
+            is_emergency_ = false;
+            RCLCPP_INFO(this->get_logger(), "Collision Monitor Timeout. Resuming Pure Pursuit...");
+        }
+
+        // 비상 상황이거나 목표에 도달했으면 정지 [수정됨]
+        if (is_emergency_ || is_goal_reached_) {
+            ackermann_msgs::msg::AckermannDriveStamped stop_msg;
+            stop_msg.header = msg->header;
+            stop_msg.drive.steering_angle = 0.0;
+            stop_msg.drive.speed = 0.0;
+            drive_pub_->publish(stop_msg);
+            return;
+        }
+
         if (waypoints_.empty()) return;
 
-        // 1. 차량 상태 추출
+        // --- 정상 주행 로직 (기존과 동일) ---
         double curr_x = msg->pose.pose.position.x;
         double curr_y = msg->pose.pose.position.y;
         double curr_vel = msg->twist.twist.linear.x;
 
-        // 쿼터니언 -> Yaw
         tf2::Quaternion q(
             msg->pose.pose.orientation.x,
             msg->pose.pose.orientation.y,
@@ -135,11 +195,9 @@ private:
         double roll, pitch, yaw;
         m.getRPY(roll, pitch, yaw);
 
-        // 2. 가장 가까운 웨이포인트 찾기 (Nearest Point)
         int best_idx = 0;
         double min_dist_sq = 1e9;
         
-        // 전체 탐색 (맵이 매우 크면 KD-Tree 써야 하지만, 레이싱 트랙 정도는 괜찮음)
         for (size_t i = 0; i < waypoints_.size(); i++) {
             double dx = waypoints_[i].x - curr_x;
             double dy = waypoints_[i].y - curr_y;
@@ -150,14 +208,11 @@ private:
             }
         }
 
-        // 3. 목표점(Lookahead Point) 찾기
-        // 속도에 따라 멀리 봄 (Dynamic Lookahead)
         double lookahead_dist = lookahead_min_ + lookahead_gain_ * curr_vel;
         
         int target_idx = best_idx;
         double dist_sum = 0.0;
         
-        // 트랙을 따라 앞쪽으로 탐색
         for (size_t i = 0; i < waypoints_.size(); i++) {
             int curr_i = (best_idx + i) % waypoints_.size();
             int next_i = (curr_i + 1) % waypoints_.size();
@@ -174,16 +229,12 @@ private:
         
         Waypoint target = waypoints_[target_idx];
 
-        // 4. 제어 입력 계산 (Pure Pursuit Logic)
-        
-        // (1) 목표점을 차량 좌표계(Body Frame)로 변환
         double dx = target.x - curr_x;
         double dy = target.y - curr_y;
         
-                double local_x = std::cos(-yaw) * dx - std::sin(-yaw) * dy;
+        double local_x = std::cos(-yaw) * dx - std::sin(-yaw) * dy;
         double local_y = std::sin(-yaw) * dx + std::cos(-yaw) * dy;
 
-        // (2) 조향각 계산: 0 나누기/NaN 완전 방지
         double dist_to_target_sq = local_x * local_x + local_y * local_y;
         const double eps = 1e-6;
 
@@ -194,18 +245,15 @@ private:
 
         double steering_angle = std::atan(curvature * wheelbase_);
 
-        // 조향 NaN / Inf 방지
         if (!std::isfinite(steering_angle)) {
             steering_angle = 0.0;
         }
 
-        // 5. 메시지 발행
         ackermann_msgs::msg::AckermannDriveStamped drive_msg;
         drive_msg.header = msg->header;
         drive_msg.drive.steering_angle = steering_angle;
 
-        // 속도 NaN / 음수 방지 + 최대속도 8m/s 로 클램프
-        double v_cmd = target.v;  // Frenet local planner가 z에 넣어둔 속도
+        double v_cmd = target.v;
 
         if (!std::isfinite(v_cmd) || v_cmd < 0.0) {
             v_cmd = 0.0;
@@ -216,11 +264,8 @@ private:
         }
 
         drive_msg.drive.speed = v_cmd;
-
-        
         drive_pub_->publish(drive_msg);
 
-        // 6. 시각화 (빨간 공)
         publish_marker(target.x, target.y);
     }
 
@@ -245,7 +290,6 @@ private:
         vis_pub_->publish(marker);
     }
         void path_callback(const nav_msgs::msg::Path::SharedPtr msg) {
-        // Frenet 노드가 퍼블리시한 local path를 waypoints_로 변환
         std::vector<Waypoint> new_wps;
         new_wps.reserve(msg->poses.size());
 
@@ -253,7 +297,6 @@ private:
             Waypoint wp;
             wp.x = ps.pose.position.x;
             wp.y = ps.pose.position.y;
-            // Frenet local planner가 z에 속도 v를 저장함
             wp.v = ps.pose.position.z;
             new_wps.push_back(wp);
         }
@@ -262,7 +305,6 @@ private:
             waypoints_ = std::move(new_wps);
         }
     }
-
 };
 
 int main(int argc, char **argv) {

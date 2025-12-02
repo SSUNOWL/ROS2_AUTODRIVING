@@ -1,3 +1,99 @@
+<최단 시간 레이싱> 실험 1 -> 각각의 최단 시간 측정하기
+의도: 
+터미널 1 기본값 (지도: Spielberg_map, robot = 1)
+ros2 launch f1tenth_gym_ros map_gym_bridge.py
+터미널2 (static publisehr, frenet, fgm, mux, pp, collision)
+(기본값 mux)
+ros2 launch planner_mux time_trial.launch.py  
+(frenet only)
+ros2 launch planner_mux time_trial.launch.py pp_path_topic:=/frenet_local_plan 
+(fgm only)
+ros2 launch planner_mux time_trial.launch.py pp_path_topic:=/fgm_path  
+
+터미널 3 (timer)
+ros2 run racecar_experiments path_timer
+
+
+<테스트 시나리오 1> 180, 90도 코너링
+의도: 급격한 회전에서 잘가는가?
+터미널 1 (지도 map360)
+ros2 launch f1tenth_gym_ros map_gym_bridge.py map_name:=360map num_agent:=1 map_img_ext:=.pgm
+
+ros2 launch planner_mux time_trial.launch.py \
+  csv_path:=180wind.csv
+
+ros2 launch planner_mux time_trial.launch.py \
+  csv_path:=180wind.csv pp_path_topic:=/frenet_local_plan 
+ros2 launch planner_mux time_trial.launch.py \
+  csv_path:=180wind.csv pp_path_topic:=/fgm_path
+
+ros2 run racecar_experiments path_timer
+
+--기각--
+<테스트 시나리오 2> 사거리에서 갑자기 등장하는 상대차 (평시에는 frenet으로 이동하다가 갑자기 상대차가 나올때 fgm)
+좌회전 하다가 or 옆에서 등장 -> 3번이랑 다르게 하려면 좌회전??
+터미널 1 (지도 test_scenarios  )
+ros2 launch f1tenth_gym_ros map_gym_bridge.py map_name:=test_scenarios num_agent:=2 map_img_ext:=.pgm
+
+터미널 2 (경로발행)
+ros2 launch planner_mux time_trial.launch.py \
+  csv_path:=lefthandling.csv \
+  spawn_opponent_enabled:=true \
+  opponent_x:=-5.0 \
+  opponent_y:=7.0 \
+  opponent_yaw:=-1.95346 pp_path_topic:=/frenet_local_plan 
+
+ros2 launch planner_mux time_trial.launch.py \
+  csv_path:=lefthandling.csv \
+  spawn_opponent_enabled:=true \
+  opponent_x:=-5.0 \
+  opponent_y:=7.0 \
+  opponent_yaw:=-1.95346  pp_path_topic:=/fgm_path
+
+ros2 launch planner_mux time_trial.launch.py \
+  csv_path:=lefthandling.csv \
+  spawn_opponent_enabled:=true \
+  opponent_x:=-5.0 \
+  opponent_y:=7.0 \
+  opponent_yaw:=-1.95346
+
+터미널 3 (상대차 조종)
+cd ~/f1_sim_ws
+source install/setup.bash
+ros2 run racecar_teleop_cpp opp_teleop
+
+
+
+
+<테스트 시나리오 3> 마주오는 자동차 회피시나리오 -> 상대차가 휘청거림
+터미널 1 (지도 공터? 넓은거?)
+
+<테스트 시나리오 4> 수동차 나란히 주행 (네모난걸 만들어서 주행)
+ros2 launch f1tenth_gym_ros map_gym_bridge.py num_agent:=2
+
+ros2 launch planner_mux time_trial.launch.py  \
+  csv_path:=raceline_with_yaw.csv \
+  spawn_opponent_enabled:=true \
+  opponent_x:=-76.4599 \
+  opponent_y:=52.0159 \
+  opponent_yaw:=-0.834526  
+
+--기각--
+<테스트 시나리오 5> fgm 바보만들기 - U자
+
+<테스트 시나리오 6> frenet 바보만들기 - 좁은 통로
+
+이 시나리오를 통해서 fgm,  frenet, mux를 튜닝한다.
+
+
+<파라미터에 따라 바꾸기>
+ros2 launch f1tenth_gym_ros map_gym_bridge.py map_name:=test_scenarios num_agent:=2 map_img_ext:=.pgm
+
+
+
+
+
+
 실행 전 - f1_sim_ws/src/f1tenth_gym_ros/config/sim.yaml 들어가서
 map_path: "/home/<사용자이름>/f1_sim_ws/src/f1tenth_gym_ros/maps/Spielberg_map"
 <사용자이름> 부분을 내 우분투 아이디로 변경

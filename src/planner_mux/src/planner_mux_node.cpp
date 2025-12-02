@@ -11,395 +11,525 @@
 
 using std::placeholders::_1;
 
-struct Metrics
-{
-  double min_obs_dist;   // 장애물까지 최소 거리
-  double avg_speed;      // 평균 속도 (z)
-  double jerk_cost;      // jerk 기반 비용
-  double tracking_error; // 전역 경로와의 평균 거리
+struct Metrics {
+  double min_obs_dist;
+  double avg_speed;
+  double jerk_cost;
+  double tracking_error;
+  double risk_index;
+
+  double max_lat_accel;
+  double dyn_clear_margin;
 };
 
-struct Point2D
-{
+struct Point2D {
   double x;
   double y;
 };
 
-class LocalPlannerMux : public rclcpp::Node
-{
+class LocalPlannerMux : public rclcpp::Node {
 public:
-  LocalPlannerMux() : Node("local_planner_mux")
-  {
-    // ------- 파라미터 선언 & 로드 -------
-    // 최소 안전거리 [m]
-    d_min_ = this->declare_parameter("d_min", 0.45);
+  LocalPlannerMux() : Node("local_planner_mux") {
+    d_min_      = this->declare_parameter("d_min", 0.30);
+    v_ref_      = this->declare_parameter("v_ref", 5.0);
+    jerk_ref_   = this->declare_parameter("jerk_ref", 5.0);
+    track_ref_  = this->declare_parameter("track_ref", 0.5);
 
-    // RACE 모드 기준
-    track_race_thresh_ = this->declare_parameter("track_race_thresh", 0.3); // [m]
-    d_clear_race_      = this->declare_parameter("d_clear_race", 1.5);      // [m] 이 정도면 충분히 여유
+    w_speed_    = this->declare_parameter("w_speed",   1.0);
+    w_track_    = this->declare_parameter("w_track",   1.0);
+    w_comfort_  = this->declare_parameter("w_comfort", 1.0);
 
-    // 정규화 기준 값
-    track_ref_ = this->declare_parameter("track_ref", 0.5); // tracking_error 기준
-    jerk_ref_  = this->declare_parameter("jerk_ref", 5.0);  // jerk 비용 기준
+    vehicle_radius_ = this->declare_parameter("vehicle_radius", 0.25);
+    clearance_ref_  = this->declare_parameter("clearance_ref", 0.5);
+    risk_ref_       = this->declare_parameter("risk_ref", 1.0);
+    w_clearance_    = this->declare_parameter("w_clearance", 1.0);
 
-    // 경계 상황에서 점수 비교 시 가중치
-    alpha_clear_ = this->declare_parameter("alpha_clear", 1.0);  // 장애물 여유 중요도
-    alpha_track_ = this->declare_parameter("alpha_track", 1.0);  // Frenet tracking 중요도
-    alpha_jerk_  = this->declare_parameter("alpha_jerk", 0.2);   // jerk 중요도
-    beta_track_  = this->declare_parameter("beta_track", 0.2);   // FGM tracking 중요도(훨씬 낮게)
+    a_lat_max_      = this->declare_parameter("a_lat_max", 7.0);
+    a_brake_max_    = this->declare_parameter("a_brake_max", 8.0);
+    react_time_     = this->declare_parameter("react_time", 0.3);
+    w_dynamics_     = this->declare_parameter("w_dynamics", 1.0);
 
-    // ------- 구독 설정 -------
+    max_speed_mux_   = this->declare_parameter("max_speed_mux", 6.0);
+    max_dv_step_mux_ = this->declare_parameter("max_dv_step_mux", 1.0);
+
+    // 히스테리시스 파라미터
+    switch_min_interval_ = this->declare_parameter("switch_min_interval", 0.8); // 최소 0.8초 유지
+    switch_score_margin_ = this->declare_parameter("switch_score_margin", 0.15); // 점수 0.15 이상 좋아야 갈아탐
+
+    last_switch_time_ = this->now();
+    
     sub_frenet_ = this->create_subscription<nav_msgs::msg::Path>(
-      "/frenet_local_plan", 10, std::bind(&LocalPlannerMux::frenet_callback, this, _1));
+      "/frenet_local_plan", 10,
+      std::bind(&LocalPlannerMux::frenet_callback, this, _1));
 
     sub_fgm_ = this->create_subscription<nav_msgs::msg::Path>(
-      "/fgm_path", 10, std::bind(&LocalPlannerMux::fgm_callback, this, _1));
+      "/fgm_path", 10,
+      std::bind(&LocalPlannerMux::fgm_callback, this, _1));
 
     sub_global_ = this->create_subscription<nav_msgs::msg::Path>(
-      "/plan", 10, std::bind(&LocalPlannerMux::global_callback, this, _1));
+      "/plan", 10,
+      std::bind(&LocalPlannerMux::global_callback, this, _1));
 
     sub_scan_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
-      "/scan", 10, std::bind(&LocalPlannerMux::scan_callback, this, _1));
+      "/scan", 10,
+      std::bind(&LocalPlannerMux::scan_callback, this, _1));
 
     sub_odom_ = this->create_subscription<nav_msgs::msg::Odometry>(
-      "/ego_racecar/odom", 10, std::bind(&LocalPlannerMux::odom_callback, this, _1));
+      "/ego_racecar/odom", 10,
+      std::bind(&LocalPlannerMux::odom_callback, this, _1));
 
-    // ------- 발행 설정 -------
     pub_selected_ = this->create_publisher<nav_msgs::msg::Path>(
       "/selected_path", 10);
 
-    // 20Hz 주기 타이머
     timer_ = this->create_wall_timer(
       std::chrono::milliseconds(50),
       std::bind(&LocalPlannerMux::control_loop, this));
 
-    RCLCPP_INFO(
-      this->get_logger(),
-      "LocalPlannerMux started. d_min=%.2f, track_race_thresh=%.2f, d_clear_race=%.2f",
-      d_min_, track_race_thresh_, d_clear_race_);
+    current_mode_ = "NONE";
+    current_planner_ = "NONE";
+
+    RCLCPP_INFO(this->get_logger(), "[MUX] started (quiet mode)");
   }
 
 private:
-  // ===== 콜백들 =====
-  void frenet_callback(const nav_msgs::msg::Path::SharedPtr msg)
-  {
+  void frenet_callback(const nav_msgs::msg::Path::SharedPtr msg) {
     last_frenet_path_ = *msg;
     has_frenet_ = true;
   }
 
-  void fgm_callback(const nav_msgs::msg::Path::SharedPtr msg)
-  {
+  void fgm_callback(const nav_msgs::msg::Path::SharedPtr msg) {
     last_fgm_path_ = *msg;
     has_fgm_ = true;
   }
 
-  void global_callback(const nav_msgs::msg::Path::SharedPtr msg)
-  {
+  void global_callback(const nav_msgs::msg::Path::SharedPtr msg) {
     global_path_ = *msg;
     has_global_ = true;
   }
 
-  void scan_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
-  {
+  void scan_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
     last_scan_ = *msg;
     has_scan_ = true;
   }
 
-  void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg)
-  {
+  void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg) {
     last_odom_ = *msg;
     has_odom_ = true;
   }
 
-  // ===== 메인 루프 =====
-  void control_loop()
-  {
-    if (!has_frenet_ || !has_fgm_ || !has_global_ || !has_scan_ || !has_odom_) {
+  void control_loop() {
+    if (!has_frenet_ || !has_fgm_ || !has_global_ || !has_scan_ || !has_odom_)
       return;
-    }
 
-    // 장애물 포인트 집합 생성 (Laser + Odom 기반, map 좌표계로 근사)
-    std::vector<Point2D> obs_points = build_obstacle_points(last_scan_, last_odom_);
+    nav_msgs::msg::Path eval_frenet = last_frenet_path_;
+    nav_msgs::msg::Path eval_fgm    = last_fgm_path_;
 
-    // 각 경로에 대한 메트릭 계산
-    Metrics mf = evaluate_path(last_frenet_path_, obs_points);
-    Metrics mg = evaluate_path(last_fgm_path_,    obs_points);
+    std::vector<Point2D> obs = build_obstacle_points(last_scan_, last_odom_);
 
-    bool frenet_safe = (mf.min_obs_dist >= d_min_);
-    bool fgm_safe    = (mg.min_obs_dist >= d_min_);
+    Metrics mf = evaluate_path(eval_frenet, obs);
+    Metrics mg = evaluate_path(eval_fgm,    obs);
 
-    nav_msgs::msg::Path selected;
-    bool publish_needed = false;
+    bool frenet_safe = is_path_safe(mf);
+    bool fgm_safe    = is_path_safe(mg);
 
-    // ===== 1) EMERGENCY 모드: 둘 다 위험 =====
-    if (!frenet_safe && !fgm_safe) {
-      selected = (mf.min_obs_dist >= mg.min_obs_dist)
-               ? last_frenet_path_
-               : last_fgm_path_;
+    double sf = score_normal(mf);
+    double sg = score_normal(mg);
 
-      publish_needed = true;
+    // 1단계: "이론적으로" 무엇이 더 좋은지 먼저 결정
+    std::string candidate_mode    = "NONE";
+    std::string candidate_planner = "NONE";
+    nav_msgs::msg::Path candidate_path;
+    bool candidate_valid = false;
 
-      RCLCPP_ERROR(
-        this->get_logger(),
-        "[EMERGENCY] BOTH unsafe. "
-        "Frenet min_dist=%.3f, FGM min_dist=%.3f, d_min=%.3f. "
-        "Choose path with larger clearance: %s",
-        mf.min_obs_dist, mg.min_obs_dist, d_min_,
-        (mf.min_obs_dist >= mg.min_obs_dist) ? "FRENET" : "FGM");
-    }
-
-    // ===== 2) AVOID 모드: Frenet만 위험, FGM은 안전 =====
-    else if (!frenet_safe && fgm_safe) {
-      selected = last_fgm_path_;
-      publish_needed = true;
-
-      RCLCPP_WARN(
-        this->get_logger(),
-        "[AVOID] Frenet unsafe (%.3f < d_min=%.3f). Use FGM.",
-        mf.min_obs_dist, d_min_);
-    }
-
-    // ===== 3) FGM만 위험, Frenet은 안전 =====
-    else if (frenet_safe && !fgm_safe) {
-      selected = last_frenet_path_;
-      publish_needed = true;
-
-      RCLCPP_WARN(
-        this->get_logger(),
-        "[RACE] FGM unsafe (%.3f < d_min=%.3f). Keep Frenet.",
-        mg.min_obs_dist, d_min_);
-    }
-
-    // ===== 4) 둘 다 안전: RACE / 경계 상황 =====
-    else {
-      // RACE 모드: Frenet이 레이싱라인 잘 따라가고, 장애물도 충분히 멀다
-      if (mf.tracking_error < track_race_thresh_ &&
-          mf.min_obs_dist   > d_clear_race_) {
-
-        selected = last_frenet_path_;
-        publish_needed = true;
-
-        RCLCPP_DEBUG(
-          this->get_logger(),
-          "[RACE] Both safe. Frenet closely follows global path "
-          "and clearance is large (dist=%.3f, track_err=%.3f). Use Frenet.",
-          mf.min_obs_dist, mf.tracking_error);
+    if (frenet_safe && fgm_safe) {
+      // 둘 다 안전할 때: NORMAL 모드, 점수 높은 쪽 선택
+      candidate_mode = "NORMAL";
+      if (sf >= sg) {
+        candidate_planner = "FRENET";
+        candidate_path = eval_frenet;
       } else {
-        // 경계 상황: 둘 다 안전이긴 한데,
-        // Frenet이 레이싱라인에서 살짝 벗어나기 시작했거나,
-        // 장애물이 좀 가까운 편인 경우.
-        double sf = score_frenet(mf);
-        double sg = score_fgm(mg);
+        candidate_planner = "FGM";
+        candidate_path = eval_fgm;
+      }
+      candidate_valid = true;
+    } else {
+      // 한쪽이라도 unsafe면 EMERGENCY 모드
+      candidate_mode = "EMERGENCY";
 
-        selected = (sf >= sg) ? last_frenet_path_ : last_fgm_path_;
-        publish_needed = true;
+      if (frenet_safe && !fgm_safe) {
+        candidate_planner = "FRENET";
+        candidate_path = eval_frenet;
+        candidate_valid = true;
+      }
+      else if (!frenet_safe && fgm_safe) {
+        candidate_planner = "FGM";
+        candidate_path = eval_fgm;
+        candidate_valid = true;
+      }
+      else {
+        // ★ 둘 다 unsafe인 경우: min_d 절대 우선
+        double df = mf.min_obs_dist;
+        double dg = mg.min_obs_dist;
 
-        RCLCPP_DEBUG(
-          this->get_logger(),
-          "[BOUNDARY] Both safe but near obstacles / off-line.\n"
-          "  Frenet : dist=%.3f, e=%.3f, J=%.3f, score=%.3f\n"
-          "  FGM    : dist=%.3f, e=%.3f, J=%.3f, score=%.3f\n"
-          "  Selected: %s",
-          mf.min_obs_dist, mf.tracking_error, mf.jerk_cost, sf,
-          mg.min_obs_dist, mg.tracking_error, mg.jerk_cost, sg,
-          (sf >= sg) ? "FRENET" : "FGM");
+        const double eps = 1e-3;
+        if (df > dg + eps) {
+          candidate_planner = "FRENET";
+          candidate_path = eval_frenet;
+        } else if (dg > df + eps) {
+          candidate_planner = "FGM";
+          candidate_path = eval_fgm;
+        } else {
+          // min_d 거의 비슷하면 점수로 결정
+          if (sf >= sg) {
+            candidate_planner = "FRENET";
+            candidate_path = eval_frenet;
+          } else {
+            candidate_planner = "FGM";
+            candidate_path = eval_fgm;
+          }
+        }
+        candidate_valid = true;
       }
     }
 
-    // 최종 선택된 경로 publish
-    if (publish_needed) {
-      selected.header.stamp = this->now();
-      pub_selected_->publish(selected);
+    if (!candidate_valid || candidate_planner == "NONE") {
+      // 선택할 수 없는 상황이면 그냥 아무것도 안 보냄
+      return;
+    }
+
+    // 2단계: 히스테리시스 적용 (최소 유지 시간 + 점수 차이 마진)
+    auto now = this->now();
+    bool allow_switch = true;
+
+    if (current_planner_ != "NONE" &&
+        candidate_planner != current_planner_) {
+
+      // (1) 최소 유지 시간 체크
+      double dt = (now - last_switch_time_).seconds();
+      if (dt < switch_min_interval_) {
+        allow_switch = false;
+      } else {
+        // (2) 점수 차이 충분히 나는지 체크
+        double score_candidate =
+          (candidate_planner == "FRENET") ? sf : sg;
+        double score_curr =
+          (current_planner_ == "FRENET") ? sf :
+          (current_planner_ == "FGM")    ? sg : score_candidate;
+
+        if (score_candidate < score_curr + switch_score_margin_) {
+          allow_switch = false;
+        }
+      }
+    }
+
+    // 3단계: 스위치 불허면, 기존 플래너 유지
+    std::string new_mode    = candidate_mode;
+    std::string new_planner = candidate_planner;
+    nav_msgs::msg::Path selected = candidate_path;
+
+    if (!allow_switch && current_planner_ != "NONE") {
+      new_planner = current_planner_;
+      new_mode    = current_mode_;
+
+      if (current_planner_ == "FRENET")
+        selected = eval_frenet;
+      else if (current_planner_ == "FGM")
+        selected = eval_fgm;
+    }
+
+    // 4단계: 로그 + 스위치 시간 갱신
+    bool mode_changed    = (new_mode    != current_mode_);
+    bool planner_changed = (new_planner != current_planner_);
+
+    if (mode_changed || planner_changed) {
+      RCLCPP_INFO(this->get_logger(),
+        "[MUX] mode=%s → %s | planner=%s → %s",
+        current_mode_.c_str(), new_mode.c_str(),
+        current_planner_.c_str(), new_planner.c_str());
+
+      // 변경 시에만 두 궤적의 점수 + 구성 요소 로그 출력
+      auto log_metrics = [this](const char* name,
+                                const Metrics& m,
+                                double score) {
+        RCLCPP_INFO(
+          this->get_logger(),
+          "[MUX]  %s | score=%.3f | v=%.2f | jerk=%.3f | track=%.3f | "
+          "min_d=%.3f | risk=%.3f | a_lat=%.3f | dyn_margin=%.3f",
+          name,
+          score,
+          m.avg_speed,
+          m.jerk_cost,
+          m.tracking_error,
+          m.min_obs_dist,
+          m.risk_index,
+          m.max_lat_accel,
+          m.dyn_clear_margin
+        );
+      };
+
+      log_metrics("FRENET", mf, sf);
+      log_metrics("FGM",    mg, sg);
+
+      if (planner_changed) {
+        last_switch_time_ = now;
+      }
+
+      current_mode_    = new_mode;
+      current_planner_ = new_planner;
+    }
+
+    // 5단계: 속도 프로파일 적용 후 publish
+    enforce_speed_profile(selected);
+    selected.header.stamp = this->now();
+    pub_selected_->publish(selected);
+  }
+
+  // ★ EMERGENCY 기준 현실화: dyn_clear_margin은 안전 판정에 사용하지 않음
+  bool is_path_safe(const Metrics & m) const {
+    bool geom_ok = (m.min_obs_dist >= d_min_);
+    bool lat_ok  = (std::fabs(m.max_lat_accel) <= a_lat_max_);
+    return geom_ok && lat_ok;
+  }
+
+  void enforce_speed_profile(nav_msgs::msg::Path & path) {
+    if (path.poses.empty()) return;
+
+    double prev_v = 0.0;
+    for (size_t i = 0; i < path.poses.size(); i++) {
+      double v = path.poses[i].pose.position.z;
+      if (!std::isfinite(v)) v = 0.0;
+
+      v = std::min(v, max_speed_mux_);
+
+      if (i > 0) {
+        double dv = v - prev_v;
+        if (dv >  max_dv_step_mux_) v = prev_v + max_dv_step_mux_;
+        if (dv < -max_dv_step_mux_) v = prev_v - max_dv_step_mux_;
+      }
+      path.poses[i].pose.position.z = v;
+      prev_v = v;
     }
   }
 
-  // ===== 경로 평가 함수들 =====
   Metrics evaluate_path(const nav_msgs::msg::Path & path,
-                        const std::vector<Point2D> & obs_points)
-  {
+                        const std::vector<Point2D> & obs) {
+
     Metrics m;
     m.avg_speed       = compute_avg_speed(path);
     m.jerk_cost       = compute_jerk_cost(path);
     m.tracking_error  = compute_tracking_error(path, global_path_);
-    m.min_obs_dist    = compute_min_obs_dist(path, obs_points);
+    m.min_obs_dist    = compute_min_obs_dist(path, obs);
+    m.risk_index      = compute_risk_index(path, obs);
+
+    compute_dynamics_metrics(path, obs, m);
     return m;
   }
 
-  double compute_avg_speed(const nav_msgs::msg::Path & path)
-  {
+  double compute_avg_speed(const nav_msgs::msg::Path & path) const {
     if (path.poses.empty()) return 0.0;
     double sum = 0.0;
-    for (const auto & ps : path.poses) {
-      sum += ps.pose.position.z; // z에 속도 저장
-    }
-    return sum / static_cast<double>(path.poses.size());
+    for (auto & p : path.poses) sum += p.pose.position.z;
+    return sum / path.poses.size();
   }
 
-  double compute_jerk_cost(const nav_msgs::msg::Path & path)
-  {
-    size_t n = path.poses.size();
-    if (n < 3) return jerk_ref_; // 너무 짧으면 기준값 정도로 반환
+  double compute_jerk_cost(const nav_msgs::msg::Path & path) const {
+    if (path.poses.size() < 3) return jerk_ref_;
+    std::vector<double> v(path.poses.size());
+    for (size_t i = 0; i < v.size(); i++) v[i] = path.poses[i].pose.position.z;
 
-    std::vector<double> v(n);
-    for (size_t i = 0; i < n; ++i) {
-      v[i] = path.poses[i].pose.position.z;
-    }
+    std::vector<double> a(v.size() - 1);
+    for (size_t i = 0; i + 1 < v.size(); i++) a[i] = v[i+1] - v[i];
 
-    std::vector<double> a(n - 1);
-    for (size_t i = 0; i + 1 < n; ++i) {
-      a[i] = v[i + 1] - v[i];
-    }
+    double jerk_sum = 0.0;
+    for (size_t i = 0; i + 1 < a.size(); i++)
+      jerk_sum += std::pow(a[i+1] - a[i], 2);
 
-    double J = 0.0;
-    for (size_t i = 0; i + 1 < a.size(); ++i) {
-      double j = a[i + 1] - a[i];
-      J += j * j;
-    }
-    return J;
+    return jerk_sum;
   }
 
   double compute_tracking_error(const nav_msgs::msg::Path & local,
-                                const nav_msgs::msg::Path & global)
-  {
-    if (local.poses.empty() || global.poses.empty()) {
+                                const nav_msgs::msg::Path & global) const {
+
+    if (local.poses.empty() || global.poses.empty())
       return track_ref_;
-    }
 
     double sum = 0.0;
-    for (const auto & lp : local.poses) {
-      double x = lp.pose.position.x;
-      double y = lp.pose.position.y;
-      double min_d2 = std::numeric_limits<double>::infinity();
+    for (auto & lp : local.poses) {
+      double lx = lp.pose.position.x;
+      double ly = lp.pose.position.y;
 
-      for (const auto & gp : global.poses) {
-        double dx = gp.pose.position.x - x;
-        double dy = gp.pose.position.y - y;
-        double d2 = dx * dx + dy * dy;
-        if (d2 < min_d2) {
-          min_d2 = d2;
-        }
+      double best = 1e9;
+      for (auto & gp : global.poses) {
+        double dx = gp.pose.position.x - lx;
+        double dy = gp.pose.position.y - ly;
+        best = std::min(best, dx*dx + dy*dy);
       }
-      sum += std::sqrt(min_d2);
+      sum += std::sqrt(best);
     }
-    return sum / static_cast<double>(local.poses.size());
+    return sum / local.poses.size();
   }
 
   std::vector<Point2D> build_obstacle_points(
       const sensor_msgs::msg::LaserScan & scan,
-      const nav_msgs::msg::Odometry & odom)
-  {
-    std::vector<Point2D> pts;
-    int n = static_cast<int>(scan.ranges.size());
-    pts.reserve(n);
+      const nav_msgs::msg::Odometry & odom) const {
 
+    std::vector<Point2D> pts;
     double x0 = odom.pose.pose.position.x;
     double y0 = odom.pose.pose.position.y;
 
-    // yaw 추출
     const auto & q = odom.pose.pose.orientation;
-    double siny_cosp = 2.0 * (q.w * q.z + q.x * q.y);
-    double cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z);
-    double yaw = std::atan2(siny_cosp, cosy_cosp);
+    double siny = 2*(q.w*q.z + q.x*q.y);
+    double cosy = 1 - 2*(q.y*q.y + q.z*q.z);
+    double yaw  = std::atan2(siny, cosy);
 
-    double cos_yaw = std::cos(yaw);
-    double sin_yaw = std::sin(yaw);
+    double c = std::cos(yaw);
+    double s = std::sin(yaw);
 
     double angle = scan.angle_min;
-    for (int i = 0; i < n; ++i, angle += scan.angle_increment) {
-      float r = scan.ranges[i];
-      if (!std::isfinite(r)) continue;
-      if (r < scan.range_min || r > scan.range_max) continue;
+    for (float r : scan.ranges) {
+      if (std::isfinite(r) &&
+          r >= scan.range_min && r <= scan.range_max) {
 
-      // 라이다 프레임에서의 점 (라이다 프레임 == 차량 바디 프레임이라고 가정)
-      double lx = r * std::cos(angle);
-      double ly = r * std::sin(angle);
+        double lx = r * std::cos(angle);
+        double ly = r * std::sin(angle);
 
-      // 차량 위치 기준 월드 좌표
-      double wx = x0 + cos_yaw * lx - sin_yaw * ly;
-      double wy = y0 + sin_yaw * lx + cos_yaw * ly;
-
-      pts.push_back({wx, wy});
+        double gx = x0 + c * lx - s * ly;
+        double gy = y0 + s * lx + c * ly;
+        pts.push_back({gx, gy});
+      }
+      angle += scan.angle_increment;
     }
     return pts;
   }
 
+  double compute_eff_clear(const Point2D & p,
+                           const std::vector<Point2D> & obs) const {
+
+    double best = 1e9;
+    for (auto & o : obs) {
+      double dx = o.x - p.x;
+      double dy = o.y - p.y;
+      best = std::min(best, dx*dx + dy*dy);
+    }
+    double d = std::sqrt(best) - vehicle_radius_;
+    return std::max(0.0, d);
+  }
+
   double compute_min_obs_dist(const nav_msgs::msg::Path & path,
-                              const std::vector<Point2D> & obs_points)
-  {
-    if (path.poses.empty() || obs_points.empty()) {
-      return std::numeric_limits<double>::infinity();
+                              const std::vector<Point2D> & obs) const {
+    if (path.poses.empty() || obs.empty())
+      return 1e9;
+
+    double best = 1e9;
+    for (auto & ps : path.poses) {
+      Point2D p{ps.pose.position.x, ps.pose.position.y};
+      best = std::min(best, compute_eff_clear(p, obs));
+    }
+    return best;
+  }
+
+  double compute_risk_index(const nav_msgs::msg::Path & path,
+                            const std::vector<Point2D> & obs) const {
+    if (path.poses.empty() || obs.empty())
+      return 0.0;
+
+    double worst = 0.0;
+    for (auto & ps : path.poses) {
+      Point2D p{ps.pose.position.x, ps.pose.position.y};
+      double v = std::max(0.0, ps.pose.position.z);
+      double d = compute_eff_clear(p, obs);
+
+      double v_norm = (v_ref_ > 0.1 ? v / v_ref_ : 0.0);
+      double c_term = std::exp(-d / std::max(0.1, clearance_ref_));
+      worst = std::max(worst, v_norm * c_term);
+    }
+    return worst;
+  }
+
+  double compute_curv(double x1,double y1,double x2,double y2,double x3,double y3) const {
+    double a = std::hypot(x2-x1, y2-y1);
+    double b = std::hypot(x3-x2, y3-y2);
+    double c = std::hypot(x3-x1, y3-y1);
+    if (a<1e-4 || b<1e-4 || c<1e-4) return 0.0;
+
+    double area2 = std::abs((x2-x1)*(y3-y1) - (y2-y1)*(x3-x1));
+    double denom = a*b*c;
+    if (denom < 1e-4) return 0.0;
+    return area2 / denom;
+  }
+
+  void compute_dynamics_metrics(const nav_msgs::msg::Path & path,
+                                const std::vector<Point2D> & obs,
+                                Metrics & m) const {
+
+    if (path.poses.empty()) {
+      m.max_lat_accel = 0.0;
+      m.dyn_clear_margin = 1e9;
+      return;
     }
 
-    double min_d2 = std::numeric_limits<double>::infinity();
-    for (const auto & ps : path.poses) {
-      double x = ps.pose.position.x;
-      double y = ps.pose.position.y;
-      for (const auto & ob : obs_points) {
-        double dx = ob.x - x;
-        double dy = ob.y - y;
-        double d2 = dx * dx + dy * dy;
-        if (d2 < min_d2) {
-          min_d2 = d2;
-        }
+    double max_ay = 0.0;
+    double min_margin = 1e9;
+
+    for (size_t i = 0; i < path.poses.size(); i++) {
+      auto & ps = path.poses[i];
+      Point2D p{ps.pose.position.x, ps.pose.position.y};
+      double v = std::max(0.0, ps.pose.position.z);
+
+      double d_eff = compute_eff_clear(p, obs);
+
+      double d_dyn = v * react_time_ +
+                     (a_brake_max_ > 1e-3 ? (v*v) / (2*a_brake_max_) : 0.0);
+
+      min_margin = std::min(min_margin, d_eff - d_dyn);
+
+      double kappa = 0.0;
+      if (i>0 && i+1<path.poses.size()) {
+        auto & p0 = path.poses[i-1];
+        auto & p1 = path.poses[i];
+        auto & p2 = path.poses[i+1];
+        kappa = compute_curv(
+          p0.pose.position.x, p0.pose.position.y,
+          p1.pose.position.x, p1.pose.position.y,
+          p2.pose.position.x, p2.pose.position.y
+        );
       }
+
+      max_ay = std::max(max_ay, v*v*kappa);
     }
-    return std::sqrt(min_d2);
+
+    m.max_lat_accel = max_ay;
+    m.dyn_clear_margin = min_margin;
   }
 
-  // ===== 정규화/점수 계산 =====
-  double clamp01(double x) const
-  {
-    return std::max(0.0, std::min(1.0, x));
-  }
+  double score_normal(const Metrics & m) const {
+    auto c01 = [](double x){ return std::max(0.0, std::min(1.0, x)); };
 
-  double norm_clear(double dist) const
-  {
-    // d_clear_race 이상이면 거의 1에 가깝게
-    if (d_clear_race_ <= 1e-3) return 1.0;
-    return clamp01(dist / d_clear_race_);
-  }
+    double v_norm = c01(m.avg_speed / std::max(0.1, v_ref_));
+    double j_norm = c01(m.jerk_cost / std::max(0.1, jerk_ref_));
+    double t_norm = c01(m.tracking_error / std::max(0.1, track_ref_));
 
-  double norm_track(double e) const
-  {
-    if (track_ref_ <= 1e-3) return 1.0;
-    return clamp01(e / track_ref_);  // 작을수록 좋음
-  }
+    double c_norm = c01((m.min_obs_dist - d_min_) /
+                        std::max(0.1, clearance_ref_));
 
-  double norm_jerk(double J) const
-  {
-    if (jerk_ref_ <= 1e-3) return 1.0;
-    return clamp01(J / jerk_ref_);   // 작을수록 좋음
-  }
+    double r_norm = c01(m.risk_index / std::max(0.1, risk_ref_));
 
-  double score_frenet(const Metrics & m) const
-  {
-    double c  = norm_clear(m.min_obs_dist);       // 클수록 좋음
-    double te = norm_track(m.tracking_error);     // 작을수록 좋음
-    double j  = norm_jerk(m.jerk_cost);          // 작을수록 좋음
+    double a_norm = c01(m.max_lat_accel / std::max(0.1, a_lat_max_));
+    double dy_norm = (m.dyn_clear_margin < 0 ?
+                      c01(-m.dyn_clear_margin / 1.0) : 0.0);
 
-    // Frenet은 global path 추종이 중요
     double score = 0.0;
-    score += alpha_clear_ * c;
-    score += alpha_track_ * (1.0 - te);
-    score += alpha_jerk_  * (1.0 - j);
+    score += w_speed_     * v_norm;
+    score += w_track_     * (1.0 - t_norm);
+    score += w_comfort_   * (1.0 - j_norm);
+    score += w_clearance_ * c_norm;
+    score += w_clearance_ * (1.0 - r_norm);
+    score += w_dynamics_  * (1.0 - a_norm);
+    score += w_dynamics_  * (1.0 - dy_norm);
+
     return score;
   }
 
-  double score_fgm(const Metrics & m) const
-  {
-    double c  = norm_clear(m.min_obs_dist);
-    double te = norm_track(m.tracking_error);
-    double j  = norm_jerk(m.jerk_cost);
-
-    // FGM은 clear/jerk가 더 중요하고, global tracking은 비중 낮게
-    double score = 0.0;
-    score += alpha_clear_ * c;
-    score += beta_track_  * (1.0 - te);
-    score += alpha_jerk_  * (1.0 - j);
-    return score;
-  }
-
-  // ===== 멤버 변수 =====
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr sub_frenet_;
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr sub_fgm_;
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr sub_global_;
@@ -421,22 +551,21 @@ private:
   bool has_scan_   = false;
   bool has_odom_   = false;
 
-  // 파라미터
-  double d_min_;
-  double track_race_thresh_;
-  double d_clear_race_;
+  std::string current_mode_;
+  std::string current_planner_;
 
-  double track_ref_;
-  double jerk_ref_;
+  double d_min_, v_ref_, jerk_ref_, track_ref_;
+  double w_speed_, w_track_, w_comfort_;
+  double vehicle_radius_, clearance_ref_, risk_ref_, w_clearance_;
+  double a_lat_max_, a_brake_max_, react_time_, w_dynamics_;
+  double max_speed_mux_, max_dv_step_mux_;
 
-  double alpha_clear_;
-  double alpha_track_;
-  double alpha_jerk_;
-  double beta_track_;
+  double switch_min_interval_;
+  double switch_score_margin_;
+  rclcpp::Time last_switch_time_;
 };
 
-int main(int argc, char * argv[])
-{
+int main(int argc, char * argv[]) {
   rclcpp::init(argc, argv);
   rclcpp::spin(std::make_shared<LocalPlannerMux>());
   rclcpp::shutdown();

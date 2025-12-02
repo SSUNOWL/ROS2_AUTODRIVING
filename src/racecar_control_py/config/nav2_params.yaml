@@ -50,52 +50,59 @@ bt_navigator:
       - nav2_controller_cancel_bt_node
       - nav2_path_longer_on_approach_bt_node
       - nav2_recovery_node_bt_node
-
 controller_server:
   ros__parameters:
     use_sim_time: True
     controller_frequency: 10.0
     min_x_velocity_threshold: 0.001
-    min_y_velocity_threshold: 0.5
+    min_y_velocity_threshold: 0.0 # Non-holonomic 차량이므로 0.0 유지
     min_theta_velocity_threshold: 0.001
     controller_plugins: ["FollowPath"]
 
-    # DWA (Local Planner) 설정
+    # 🚀 Regulated Pure Pursuit Controller 적용
     FollowPath:
-      plugin: "dwb_core::DWBLocalPlanner"
-      debug_trajectory_details: True
-      min_vel_x: 0.0
-      min_vel_y: 0.0
-      max_vel_x: 2.0  # 최대 속도 (너무 빠르면 제어 안됨)
-      max_vel_y: 0.0
-      max_vel_theta: 1.0
-      min_speed_xy: 0.0
-      max_speed_xy: 2.0
-      min_speed_theta: 0.0
-      acc_lim_x: 2.5
-      acc_lim_y: 0.0
-      acc_lim_theta: 3.2
-      decel_lim_x: -2.5
-      decel_lim_y: 0.0
-      decel_lim_theta: -3.2
-      vx_samples: 20
-      vy_samples: 5
-      vtheta_samples: 20
-      sim_time: 1.7
-      linear_granularity: 0.05
-      angular_granularity: 0.025
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+      
+      # --- Pure Pursuit Parameters ---
+      # F1Tenth에 적합한 추종 거리 설정 (너무 길면 코너를 자르고, 너무 짧으면 불안정)
+      lookahead_dist: 0.6 
+      
+      # --- Kinematic & Goal Constraints ---
+      desired_linear_vel: 1.5             # 최대 주행 목표 속도
+      min_linear_vel: 0.1               # 최소 선속도
+      
+      # 전역 플래너(DUBIN)의 minimum_turning_radius와 일치 (0.50m)
+      # 🚀 전역/지역 곡률 호환성 확보
+      min_turning_radius: 0.50           
+
+      # 가속도 제약 (이전 DWB 설정 유지)
+      max_linear_accel: 2.5
+      max_angular_accel: 3.2
+      
+      # 목표 도달 허용 오차 (정밀도 유지를 위해 0.15m 유지)
+      xy_goal_tolerance: 0.15
+      yaw_goal_tolerance: 0.15
+      
+      # --- Obstacle Regulation ---
+      # 장애물과 가까워질 때 속도를 줄이는 최소 거리 설정
+      obstacle_safety_margin: 0.15
+      
+      # Costmap Inflation Radius와 동일하게 설정
+      inflation_cost_scale: 0.35 
+
+      # 후진 주행 허용 여부 (DUBIN 전진 모델을 사용하므로 False 유지)
+      allow_reversing: False
+      
+      # 기타 설정
+      use_interpolation: True
+      use_cost_regulated_speed: True    # 장애물 가까이에서 속도 조절 기능 활성화
+      regulated_linear_scaling_min_speed: 0.4 # 속도 조절 시 최소 속도
+      regulated_linear_scaling_min_radius: 0.9 # 곡률 조절 시 최소 회전 반경
+      
+      # 궤적 추종 속도 조절 시 사용할 비용맵 유형 (LOCAL로 설정)
+      cost_map_client_topic: /local_costmap/costmap_raw
+      
       transform_tolerance: 0.2
-      xy_goal_tolerance: 0.25
-      yaw_goal_tolerance: 0.25
-      short_circuit_trajectory_evaluation: True
-      stateful: True
-      critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
-      BaseObstacle.scale: 0.02
-      PathAlign.scale: 32.0
-      GoalAlign.scale: 24.0
-      PathDist.scale: 32.0
-      GoalDist.scale: 24.0
-      RotateToGoal.scale: 32.0
 
 local_costmap:
   local_costmap:
@@ -128,7 +135,8 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 0.35
+        # 🚀 필요 시 팽창 반경 증가 (0.35 -> 0.45)
+        inflation_radius: 0.45 
       always_send_full_costmap: True
 
 global_costmap:
@@ -163,42 +171,43 @@ global_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 0.35
+        # 🚀 필요 시 팽창 반경 증가 (0.35 -> 0.45)
+        inflation_radius: 0.45 
       always_send_full_costmap: True
 
 planner_server:
   ros__parameters:
-    expected_planner_frequency: 10.0 # 주기가 너무 느리면 답답할 수 있어 10~20 추천
+    expected_planner_frequency: 10.0
     use_sim_time: True
     planner_plugins: ["GridBased"]
     GridBased:
       plugin: "nav2_smac_planner/SmacPlannerHybrid"
       
-      # [F1Tenth 중요 설정] 차량의 최소 회전 반경 (단위: m)
-      # 실제 차량의 조향각 한계에 맞춰 설정 (보통 0.4 ~ 0.6)
-      minimum_turning_radius: 0.50
+      # F1Tenth 중요 설정
+      minimum_turning_radius: 0.50 # 컨트롤러와 일치, 곡률 보장
       
-      # 탐색 모델: DUBINS(전진만), REEDS_SHEPP(전진+후진)
-      # 일반적인 주행 및 좁은 곳 탈출을 위해 REEDS_SHEPP 권장
-      motion_model_for_search: "REEDS_SHEPP" 
+      # 탐색 모델: DUBINS(전진만) - 유지
+      motion_model_for_search: "DUBIN" 
 
       # 경로 평활화 (거친 격자 경로를 부드럽게)
       smooth_path: True 
       
       # 알고리즘 세부 튜닝
-      downsample_costmap: false       # 맵 해상도 유지 (정밀도 높임)
-      angle_quantization_bins: 72     # 360도를 72개(5도 단위)로 쪼개서 탐색
-      analytic_expansion_ratio: 3.5   # 목표지점이 가까우면 분석적으로 연결 (속도 향상)
+      downsample_costmap: false
+      # 각도 양자화 빈을 줄여 계산 속도를 높이고, Smooth_path에 의존 (72 -> 48)
+      angle_quantization_bins: 48 
+      analytic_expansion_ratio: 3.5 
       
       # 비용 가중치 (경로의 성향 결정)
-      reverse_penalty: 2.0            # 후진보다는 전진을 선호하도록 페널티 부여
-      change_penalty: 0.05            # 잦은 방향 전환 방지
-      non_straight_penalty: 1.2       # 직진 선호
-      cost_penalty: 2.0               # 장애물 근처 페널티
+      reverse_penalty: 2.0 
+      change_penalty: 0.05 
+      non_straight_penalty: 1.2 
+      # 🚀 벽에서 멀어지도록 cost_penalty를 대폭 증가 (1.5 -> 4.0)
+      cost_penalty: 4.0 
 
       # 기본 설정
       tolerance: 0.25
       allow_unknown: true
-      max_iterations: 8000
-      max_on_approach_iterations: 1000
-      max_planning_time: 5.0
+      max_iterations: 16000
+      max_on_approach_iterations: 2000
+      max_planning_time: 8.0

@@ -7,13 +7,13 @@
 #include <cmath>
 #include <iomanip>
 #include <sys/select.h>
-#include <algorithm> // std::max, std::min, std::clamp 사용
+#include <algorithm> 
 
 #include "rclcpp/rclcpp.hpp"
 #include "ackermann_msgs/msg/ackermann_drive_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
+#include "std_msgs/msg/bool.hpp"
 
-// 키 코드 정의
 #define KEYCODE_W 0x77
 #define KEYCODE_A 0x61
 #define KEYCODE_S 0x73
@@ -21,7 +21,6 @@
 #define KEYCODE_X 0x78
 #define KEYCODE_Q 0x71
 
-// 안내 메시지
 const char* msg = R"(
 ---------------------------
 Moving around:
@@ -47,41 +46,67 @@ public:
         // 1. 명령 퍼블리셔
         pub_drive_ = this->create_publisher<ackermann_msgs::msg::AckermannDriveStamped>("/opp_drive", 10);
         
-        // 2. 실제 속도/각도 추정을 위한 서브스크라이버
+        // 2. 오돔 서브스크라이버
         sub_odom_ = this->create_subscription<nav_msgs::msg::Odometry>(
             "/opp_racecar/odom", 10, 
             std::bind(&OppenetTeleop::odom_callback, this, std::placeholders::_1));
+
+        // 3. 충돌 감지 서브스크라이버
+        sub_crash_ = this->create_subscription<std_msgs::msg::Bool>(
+            "/experiments/crash_detected", 10,
+            std::bind(&OppenetTeleop::crash_callback, this, std::placeholders::_1));
 
         target_speed_ = 0.0;
         target_steering_angle_ = 0.0;
         
         actual_speed_ = 0.0;
         estimated_steering_angle_ = 0.0;
+        
+        is_emergency_ = false;
+        last_crash_msg_time_ = this->now(); // 시간 초기화
 
-        RCLCPP_INFO(this->get_logger(), "Oppenet Teleop Node Started");
+        RCLCPP_INFO(this->get_logger(), "Oppenet Teleop Node Started (Auto-Resume Enabled)");
+    }
+
+    // [수정됨] 충돌 감지 콜백: True/False에 따라 상태 즉시 변경
+    void crash_callback(const std_msgs::msg::Bool::SharedPtr msg)
+    {
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        
+        // 메시지 수신 시간 갱신 (Heartbeat 역할)
+        last_crash_msg_time_ = this->now();
+
+        if (msg->data) {
+            // 충돌 발생! (True)
+            if (!is_emergency_) {
+                is_emergency_ = true;
+                target_speed_ = 0.0; // 즉시 정지
+                RCLCPP_WARN(this->get_logger(), "EMERGENCY STOP! (Crash Detected)");
+            }
+        } else {
+            // 충돌 해제 (False)
+            if (is_emergency_) {
+                is_emergency_ = false;
+                RCLCPP_INFO(this->get_logger(), "Crash Cleared. Resuming control...");
+            }
+        }
     }
 
     void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg)
     {
         std::lock_guard<std::mutex> lock(data_mutex_);
-        
-        // 1. 실제 선속도 업데이트
         actual_speed_ = msg->twist.twist.linear.x;
-        double angular_z = msg->twist.twist.angular.z; // Yaw Rate (rad/s)
+        double angular_z = msg->twist.twist.angular.z; 
 
-        // 2. [Feedback] 실제 차량의 움직임을 기반으로 조향각 역산 (Estimation)
-        // 공식: tan(steer) = (wheelbase * yaw_rate) / velocity
         double wheelbase = 0.33; 
         double raw_estimate = 0.0;
 
-        // [유지] 저속 주행 시 노이즈 방지 (화면 표시용)
         if (std::abs(actual_speed_) > 0.5) {
             raw_estimate = std::atan((wheelbase * angular_z) / actual_speed_);
         } else {
             raw_estimate = 0.0;
         }
 
-        // [유지] 화면 표시용 클램핑 및 필터
         raw_estimate = std::clamp(raw_estimate, -0.4, 0.4);
         double alpha = 0.1; 
         estimated_steering_angle_ = (alpha * raw_estimate) + ((1.0 - alpha) * estimated_steering_angle_);
@@ -91,7 +116,6 @@ public:
     {
         char c;
         
-        // 터미널 설정 (Raw 모드)
         tcgetattr(kfd, &cooked);
         memcpy(&raw, &cooked, sizeof(struct termios));
         raw.c_lflag &= ~(ICANON | ECHO);
@@ -109,11 +133,20 @@ public:
 
             struct timeval timeout;
             timeout.tv_sec = 0;
-            timeout.tv_usec = 100000; // 0.1초 (루프 주기)
+            timeout.tv_usec = 100000; // 0.1s
 
             int res = select(kfd + 1, &set, NULL, NULL, &timeout);
+            bool steering_input_active = false;
 
-            bool steering_input_active = false; // 이번 루프에서 조향 키를 눌렀는지 확인
+            // [NEW] 타임아웃 체크 (충돌 노드가 죽었거나 메시지가 안 오면 해제)
+            rclcpp::Time now = this->now();
+            double time_diff = (now - last_crash_msg_time_).seconds();
+            
+            // 1.0초 이상 충돌 메시지가 없으면 안전한 것으로 간주
+            if (is_emergency_ && time_diff > 5.0) {
+                is_emergency_ = false;
+                RCLCPP_INFO(this->get_logger(), "Collision Monitor Timeout. Resuming control...");
+            }
 
             if (res > 0)
             {
@@ -122,59 +155,49 @@ public:
                     exit(-1);
                 }
 
-                switch(c)
-                {
-                    case KEYCODE_W:
-                        target_speed_ += 0.5;
-                        break;
-                    case KEYCODE_S:
-                        target_speed_ = 0.0;
-                        target_steering_angle_ = 0.0;
-                        break;
-                    case KEYCODE_X:
-                        target_speed_ -= 0.5;
-                        break;
-                    case KEYCODE_A:
-                        // 조향 민감도 (빠른 조향)
-                        target_steering_angle_ += 0.2; 
-                        steering_input_active = true;
-                        break;
-                    case KEYCODE_D:
-                        // 조향 민감도
-                        target_steering_angle_ -= 0.2;
-                        steering_input_active = true;
-                        break;
-                    case KEYCODE_Q:
-                        RCLCPP_INFO(this->get_logger(), "Exiting...");
-                        return;
+                // 비상 상황이 아닐 때만 주행 키 입력 허용
+                if (!is_emergency_) {
+                    switch(c)
+                    {
+                        case KEYCODE_W: target_speed_ += 0.5; break;
+                        case KEYCODE_S: target_speed_ = 0.0; target_steering_angle_ = 0.0; break;
+                        case KEYCODE_X: target_speed_ -= 0.5; break;
+                        case KEYCODE_A: target_steering_angle_ += 0.2; steering_input_active = true; break;
+                        case KEYCODE_D: target_steering_angle_ -= 0.2; steering_input_active = true; break;
+                        case KEYCODE_Q: RCLCPP_INFO(this->get_logger(), "Exiting..."); return;
+                    }
+                } else {
+                    // 비상시에는 종료와 확인사살 정지만 가능
+                    if (c == KEYCODE_Q) return;
+                    if (c == KEYCODE_S) { target_speed_ = 0.0; }
                 }
             }
 
-            // ---------------------------------------------------------
-            // [기능 추가] 핸들 자동 풀림 (Auto-Centering)
-            // ---------------------------------------------------------
+            // Auto-Centering
             if (!steering_input_active && std::abs(target_steering_angle_) > 0.001)
             {
-                // 복원 속도 (천천히 풀림)
                 double center_speed = 0.015; 
-
-                if (target_steering_angle_ > 0)
-                    target_steering_angle_ = std::max(0.0, target_steering_angle_ - center_speed);
-                else
-                    target_steering_angle_ = std::min(0.0, target_steering_angle_ + center_speed);
+                if (target_steering_angle_ > 0) target_steering_angle_ = std::max(0.0, target_steering_angle_ - center_speed);
+                else target_steering_angle_ = std::min(0.0, target_steering_angle_ + center_speed);
             }
 
-            // 제한 (Saturation) - 단순 최대/최소 제한으로 복귀
+            // Saturation
             if (target_speed_ > 7.0) target_speed_ = 7.0;
             if (target_speed_ < -5.0) target_speed_ = -5.0;
             if (target_steering_angle_ > 0.4) target_steering_angle_ = 0.4;
             if (target_steering_angle_ < -0.4) target_steering_angle_ = -0.4;
 
+            // 비상 정지 강제 적용
+            double final_speed = target_speed_;
+            if (is_emergency_) {
+                final_speed = 0.0;
+            }
+
             // 명령 발행
             auto drive_msg = ackermann_msgs::msg::AckermannDriveStamped();
             drive_msg.header.stamp = this->now();
             drive_msg.header.frame_id = "base_link";
-            drive_msg.drive.speed = target_speed_;
+            drive_msg.drive.speed = final_speed;
             drive_msg.drive.steering_angle = target_steering_angle_;
             pub_drive_->publish(drive_msg);
 
@@ -193,28 +216,31 @@ private:
     {
         std::lock_guard<std::mutex> lock(data_mutex_);
         
-        // 화면 갱신
+        std::string status_str = "[NORMAL]";
+        if (is_emergency_) status_str = "\033[1;31m[!! EMERGENCY !!]\033[0m"; // 빨간색 텍스트
+
         std::cout << "\033[2K\r" 
+                  << status_str 
                   << std::fixed << std::setprecision(2)
-                  << "[CMD] Spd:" << target_speed_ 
+                  << " CMD Spd:" << (is_emergency_ ? 0.0 : target_speed_) 
                   << " Str:" << target_steering_angle_
-                  << " > "
-                  << "[REAL] Spd:" << actual_speed_ 
-                  << " Est.Str:" << estimated_steering_angle_
+                  << " | REAL Spd:" << actual_speed_ 
                   << std::flush;
     }
 
     rclcpp::Publisher<ackermann_msgs::msg::AckermannDriveStamped>::SharedPtr pub_drive_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_odom_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr sub_crash_;
     
     double target_speed_;
     double target_steering_angle_;
-    
     double actual_speed_;
     double estimated_steering_angle_;
+    
+    bool is_emergency_;
+    rclcpp::Time last_crash_msg_time_; // 타임아웃 계산용
 
     std::mutex data_mutex_;
-
     int kfd = 0;
     struct termios cooked, raw;
 };
