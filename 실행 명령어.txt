@@ -6,10 +6,16 @@ ros2 launch planner_mux time_trial.launch.py  (기본값 mux)
 
 ros2 launch planner_mux time_trial.launch.py pp_path_topic:=/frenet_local_plan (frenet only)
 
-ros2 launch planner_mux time_trial.launch.py   ( fgm only)
+ros2 launch planner_mux time_trial.launch.py pp_path_topic:=/fgm_path  ( fgm only)
 
 터미널 3 (timer)
 ros2 run racecar_experiments path_timer
+
+
+<테스트 시나리오 1> 180, 90도 코너링
+터미널 1 (지도 map360)
+ros2 launch f1tenth_gym_ros map_gym_bridge.py map_name:=360map num_agent:=2 map_img_ext:=.pgm
+
 
 <파라미터에 따라 바꾸기>
 ros2 launch f1tenth_gym_ros map_gym_bridge.py map_name:=test_scenarios num_agent:=2 map_img_ext:=.pgm
