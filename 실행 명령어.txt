@@ -50,6 +50,7 @@ ros2 launch planner_mux time_trial.launch.py \
   opponent_yaw:=90.0 \
   pp_path_topic:=/fgm_path
 
+* frenet 쓰려면 frenet_local_plan으로 변경
 
 터미널 3
 cd f1_sim_ws
