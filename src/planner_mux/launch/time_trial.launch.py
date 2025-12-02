@@ -18,6 +18,8 @@ def generate_launch_description():
     # --- Launch Arguments ---
     path_mode_arg = DeclareLaunchArgument('path_mode', default_value='mux')
     map_name_arg = DeclareLaunchArgument('map_name', default_value='Spielberg_map')
+    
+    # CSV 경로 (기본값 유지)
     csv_path_arg = DeclareLaunchArgument(
         'csv_path',
         default_value=os.path.join(os.getcwd(), 'raceline_with_yaw.csv')
@@ -28,6 +30,31 @@ def generate_launch_description():
         'pp_path_topic', 
         default_value='/selected_path',  # 기본값: MUX 출력
         description='Topic name for Pure Pursuit to follow (e.g., /frenet_path, /fgm_path, /selected_path)'
+    )
+
+    # --- 상대차 스폰 관련 Launch Argument 추가 ---
+    spawn_opponent_enabled_arg = DeclareLaunchArgument(
+        'spawn_opponent_enabled',
+        default_value='false',
+        description='Enable opponent spawn via static_path_publisher'
+    )
+
+    opponent_x_arg = DeclareLaunchArgument(
+        'opponent_x',
+        default_value='0.0',
+        description='Opponent spawn x position in map frame'
+    )
+
+    opponent_y_arg = DeclareLaunchArgument(
+        'opponent_y',
+        default_value='0.0',
+        description='Opponent spawn y position in map frame'
+    )
+
+    opponent_yaw_arg = DeclareLaunchArgument(
+        'opponent_yaw',
+        default_value='0.0',
+        description='Opponent spawn yaw (rad) in map frame'
     )
     
     # -----------------------------------------------------
@@ -49,13 +76,19 @@ def generate_launch_description():
         output='screen'
     )
 
-    # 1. static_path_publisher (CSV 경로 발행)
+    # 1. static_path_publisher (CSV 경로 + 상대차 파라미터 발행)
     static_path_node = Node(
         package='racecar_experiments',
         executable='static_path_publisher',
         name='static_path_publisher',
         output='screen',
-        parameters=[{'csv_path': LaunchConfiguration('csv_path')}]
+        parameters=[{
+            'csv_path': LaunchConfiguration('csv_path'),
+            'spawn_opponent_enabled': LaunchConfiguration('spawn_opponent_enabled'),
+            'opponent_x': LaunchConfiguration('opponent_x'),
+            'opponent_y': LaunchConfiguration('opponent_y'),
+            'opponent_yaw': LaunchConfiguration('opponent_yaw'),
+        }]
     )
 
     # 2-1. Frenet Planner
@@ -167,6 +200,10 @@ def generate_launch_description():
         map_name_arg,
         csv_path_arg,
         pp_path_topic_arg,
+        spawn_opponent_enabled_arg,
+        opponent_x_arg,
+        opponent_y_arg,
+        opponent_yaw_arg,
 
         # 0: 초기 정지 명령
         initial_stop_timer,

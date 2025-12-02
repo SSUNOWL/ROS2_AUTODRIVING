@@ -23,6 +23,16 @@ ros2 launch f1tenth_gym_ros map_gym_bridge.py map_name:=360map num_agent:=2 map_
 터미널 1 (지도 360map)
 ros2 launch f1tenth_gym_ros map_gym_bridge.py map_name:=360map num_agent:=2 map_img_ext:=.pgm
 
+터미널 2 (경로발행)
+ros2 launch planner_mux time_trial.launch.py \
+  csv_path:=path_segment1.csv \
+  spawn_opponent_enabled:=true \
+  opponent_x:=-5.0 \
+  opponent_y:=7.0 \
+  opponent_yaw:=-1.95346
+
+
+
 <테스트 시나리오 3> 마주오는 자동차 회피시나리오 -> 상대차가 휘청거림
 터미널 1 (지도 공터? 넓은거?)
 
