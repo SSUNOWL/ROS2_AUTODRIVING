@@ -35,6 +35,28 @@ ros2 launch planner_mux time_trial.launch.py \
 
 <테스트 시나리오 3> 마주오는 자동차 회피시나리오 -> 상대차가 휘청거림
 터미널 1 (지도 공터? 넓은거?)
+cd f1_sim_ws
+source install/setup.bash
+ros2 launch f1tenth_gym_ros map_gym_bridge.py map_name:=test_scenarios num_agent:=2 map_img_ext:=.pgm
+
+터미널 2
+cd f1_sim_ws
+source install/setup.bash
+ros2 launch planner_mux time_trial.launch.py \
+  csv_path:=bumper.csv \
+  spawn_opponent_enabled:=true \
+  opponent_x:=3.96493 \
+  opponent_y:=-5.07551 \
+  opponent_yaw:=90.0 \
+  pp_path_topic:=/fgm_path
+
+
+터미널 3
+cd f1_sim_ws
+source install/setup.bash
+ros2 run racecar_teleop_cpp opp_teleop
+
+터미널 2 실행 시, 약간의 대기가 있으니 터미널 3을 활성화 시킨 상태에서 켜고 상대차 전진 시작할것
 
 <테스트 시나리오 4> 수동차 나란히 주행 (네모난걸 만들어서 주행)
 
