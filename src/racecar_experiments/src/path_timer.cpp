@@ -47,7 +47,7 @@ private:
     }
 
     // 디버깅용 로그 추가
-    RCLCPP_INFO(this->get_logger(), "Received Path with %zu points.", msg->poses.size());
+    // RCLCPP_INFO(this->get_logger(), "Received Path with %zu points.", msg->poses.size());
 
     double sx = msg->poses.front().pose.position.x;
     double sy = msg->poses.front().pose.position.y;

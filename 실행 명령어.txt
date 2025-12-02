@@ -1,5 +1,15 @@
-<최단 시간 레이싱> (안됨)
-ros2 launch planner_mux time_trial.launch.py
+<최단 시간 레이싱> 실험 1 -> 각각의 최단 시간 측정하기
+터미널 1 기본값 (지도: Spielberg_map, robot = 1)
+ros2 launch f1tenth_gym_ros map_gym_bridge.py
+터미널2 (static publisehr, frenet, fgm, mux, pp, collision)
+ros2 launch planner_mux time_trial.launch.py  (기본값 mux)
+
+ros2 launch planner_mux time_trial.launch.py pp_path_topic:=/frenet_local_plan (frenet only)
+
+ros2 launch planner_mux time_trial.launch.py   ( fgm only)
+
+터미널 3 (timer)
+ros2 run racecar_experiments path_timer
 
 <파라미터에 따라 바꾸기>
 ros2 launch f1tenth_gym_ros map_gym_bridge.py map_name:=test_scenarios num_agent:=2 map_img_ext:=.pgm
