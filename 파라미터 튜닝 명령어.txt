@@ -14,7 +14,7 @@
 모든 점수에서 좋은 성적을 내는 mux 가중치를 찾아보자
 
 https://chatgpt.com/share/692f495f-feb4-800c-af5c-7a5a867caa4b
-이거 읽어보면될듯
+이거 초반부분 읽어보면될듯
 
 현재 상황은 frenet parameter 세팅 끝나서
 frenet_local_planner/launch/frenet_with_pp_profile.launch.py
@@ -24,7 +24,8 @@ frenet_local_planner/launch/frenet_with_pp_profile.launch.py
 /frenet_local_planner/tuning.txt 에다가 다 넣어둠
 
 -> https://chatgpt.com/g/g-p-692dc4babac48191a370a97213b7a956-jayuljuhaeng/c/692f5046-dfc0-8321-8f24-769df2480e12
-내일 오전에 자율주행 하고싶으면 이거하셈
+내일 오전에 자율주행 하고싶으면 이거하셈 -> 여기도 할거 정리 되있으니꼐 확인해주셈
+(fgm 튜닝)
 
 frenet 튜닝할때 사용한 명령어
 (지도켜기)
@@ -34,5 +35,9 @@ ros2 run racecar_experiments static_path_publisher   --ros-args -p csv_path:="$(
 (frenet with pp실행)
 ros2 launch racecar_frenet_cpp frenet_with_pp.launch.py   max_speed:=7.0 max_accel:=6.0 max_curvature:=0.9 target_speed:=8.0  pp_max_speed:=7.0 pp_use_frenet_path:=true   pp_frenet_path_topic:=/frenet_local_plan
 (logger 실행 + collision ) -> logger가 이제 timer랑 역할이 똑같음
+logger는 .csv 만들어지고 평균, 최대 값들 최종 로그 출력함
 ros2 launch racecar_experiments experiment_logger.launch.py     scenario_name:=spielberg     planner_mode:=FRENET     output_dir:=$(pwd)/logs     collision_topic:=/experiments/crash_detected
+
+지도켜기 -> static -> logger 실행 -> frenet with pp 실행
+--> 기다리기 (충돌나거나 목표 도착하면 logger알아서 꺼짐) -> 로그에 출력되는거 복사해서 gpt주기
 
