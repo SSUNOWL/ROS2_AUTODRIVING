@@ -209,6 +209,6 @@ planner_server:
       # 기본 설정
       tolerance: 0.25
       allow_unknown: true
-      max_iterations: 8000
-      max_on_approach_iterations: 1000
-      max_planning_time: 5.0
+      max_iterations: 16000
+      max_on_approach_iterations: 2000
+      max_planning_time: 8.0

@@ -67,9 +67,15 @@ public:
             "/experiments/crash_detected", 10,
             std::bind(&PurePursuit::crash_callback, this, std::placeholders::_1));
 
-        last_crash_msg_time_ = this->now();
+        // [추가됨] 목표 도달 신호 구독
+        goal_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+            "/experiments/goal_reached", 10,
+            std::bind(&PurePursuit::goal_callback, this, std::placeholders::_1));
 
-        RCLCPP_INFO(this->get_logger(), "Pure Pursuit Started (Auto-Resume Enabled).");
+        last_crash_msg_time_ = this->now();
+        is_goal_reached_ = false; // [추가됨] 목표 도달 상태 초기화
+
+        RCLCPP_INFO(this->get_logger(), "Pure Pursuit Started (Auto-Resume & Goal Stop Enabled)."); // 로그 수정
     }
 
 private:
@@ -80,7 +86,10 @@ private:
     rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
     
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr crash_sub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr goal_sub_; // [추가됨]
+
     bool is_emergency_ = false;
+    bool is_goal_reached_ = false; // [추가됨] 목표 도달 상태 플래그
     rclcpp::Time last_crash_msg_time_; // 타임아웃용 시간 기록
 
     bool use_frenet_path_;
@@ -109,12 +118,27 @@ private:
         }
     }
 
+    // [추가됨] 목표 도달 신호 콜백
+    void goal_callback(const std_msgs::msg::Bool::SharedPtr msg) {
+        if (msg->data) {
+            if (!is_goal_reached_) {
+                is_goal_reached_ = true;
+                RCLCPP_INFO(this->get_logger(), "GOAL STOP ACTIVATED! (Goal Reached)");
+            }
+        } else {
+            if (is_goal_reached_) {
+                is_goal_reached_ = false;
+                RCLCPP_INFO(this->get_logger(), "Goal Stop Cleared. Resuming Pure Pursuit...");
+            }
+        }
+    }
+
     bool load_waypoints(string path) {
         ifstream file(path);
         if (!file.is_open()) return false;
 
-        string line;
-        getline(file, line); 
+          string line;
+            getline(file, line); 
 
         while (getline(file, line)) {
             stringstream ss(line);
@@ -136,7 +160,7 @@ private:
     }
 
     void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg) {
-        // [NEW] 타임아웃 체크 (1.0초 이상 메시지 없으면 자동 해제)
+        // [NEW] 타임아웃 체크 (충돌 관련만)
         rclcpp::Time now = this->now();
         double time_diff = (now - last_crash_msg_time_).seconds();
 
@@ -145,8 +169,8 @@ private:
             RCLCPP_INFO(this->get_logger(), "Collision Monitor Timeout. Resuming Pure Pursuit...");
         }
 
-        // 비상 상황이면 정지
-        if (is_emergency_) {
+        // 비상 상황이거나 목표에 도달했으면 정지 [수정됨]
+        if (is_emergency_ || is_goal_reached_) {
             ackermann_msgs::msg::AckermannDriveStamped stop_msg;
             stop_msg.header = msg->header;
             stop_msg.drive.steering_angle = 0.0;
