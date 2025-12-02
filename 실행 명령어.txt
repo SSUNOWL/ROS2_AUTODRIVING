@@ -1,6 +1,8 @@
-<최단 시간 레이싱>
+<최단 시간 레이싱> (안됨)
 ros2 launch planner_mux time_trial.launch.py
 
+<파라미터에 따라 바꾸기>
+ros2 launch f1tenth_gym_ros map_gym_bridge.py map_name:=test_scenarios num_agent:=2 map_img_ext:=.pgm
 
 
 
