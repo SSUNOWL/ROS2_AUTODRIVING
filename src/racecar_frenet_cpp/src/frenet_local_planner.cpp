@@ -243,10 +243,6 @@ private:
 
       prev = p;
     }
-
-    // RCLCPP_INFO(this->get_logger(),
-    //             "Preprocessed global path to %zu ref points (total length = %.2f m)",
-    //             ref_points_.size(), s_acc);
   }
 
   // ---------- (x,y) → (s,d) 변환 ----------
@@ -350,11 +346,27 @@ private:
     if (!has_odom_ || ref_points_.empty()) return false;
 
     // 장애물 관련 파라미터
-    const double safe_radius    = 0.2;   // 이 안이면 충돌로 간주
-    const double soft_radius    = 1.0;   // 이 안이면 cost 크게
-    const double k_obs          = 3.0;  // 장애물 cost 가중치
-    const double emergency_dist = 0.5;   // 이 안이면 강하게 감속
-    const double escape_dist    = 0.35;   // 이 안이면 "탈출 모드"
+    const double safe_radius     = 0.2;   // 이 안이면 충돌로 간주
+    const double soft_radius     = 1.0;   // 이 안이면 cost 크게
+    const double k_obs           = 3.0;   // 장애물 cost 가중치
+    const double emergency_dist  = 0.5;   // 이 안이면 강하게 감속
+    const double escape_dist     = 0.35;  // 이 안이면 "탈출 모드"
+    
+    // [Soft Constraints] 기본 비용 가중치
+    const double kJ = 0.1;        // Jerk cost
+    const double kT = 0.1;        // Time cost
+    const double kD = 1.0;        // Lateral deviation cost
+    const double kLon = 1.0;      // Longitudinal speed cost
+    const double kLat = 1.0;      // Lateral acceleration cost
+    
+    // [Soft Constraints] 위반 페널티 가중치 및 하드 컷 팩터 (사용자 요청 반영)
+    const double w_v_viol = 5.0;  // 속도 위반 가중치
+    const double w_a_viol = 5.0;  // 가속도 위반 가중치
+    const double w_k_viol = 20.0; // 곡률 위반 가중치 (코너링 성능 위해 높게 설정)
+
+    const double hard_speed_factor = 1.5;     // 1.5배 초과 시 하드 컷
+    const double hard_accel_factor = 1.5;
+    const double hard_curvature_factor = 1.5;
 
     // 1. 현재 상태 (x,y,yaw,v) → (s, d, s_d, d_d, d_dd)
     const auto & pose = latest_odom_.pose.pose;
@@ -498,7 +510,7 @@ private:
         }
       }
 
-      // 장애물과의 최소거리 / 충돌 여부
+      // 장애물과의 최소거리 / 충돌 여부 (Hard Constraint 유지!)
       if (!obstacles_.empty()) {
         for (size_t i = 0; i < fp.x.size(); ++i) {
           const Eigen::Vector2d p(fp.x[i], fp.y[i]);
@@ -525,20 +537,34 @@ private:
         continue;
       }
 
-      // 제약 위반 체크
-      bool valid = true;
+      // [핵심 변경] Soft Constraint 적용 로직
+      double penalty = 0.0;
+      bool hard_invalid = false;
+      
       for (size_t i = 0; i < fp.v.size(); ++i) {
-        if (std::fabs(fp.v[i]) > max_speed_ + 1e-3) {
-          valid = false; break;
-        }
-        if (std::fabs(fp.a[i]) > max_accel_ + 1e-3) {
-          valid = false; break;
-        }
-        if (std::fabs(fp.c[i]) > max_curvature_ + 1e-3) {
-          valid = false; break;
-        }
+          double v = std::fabs(fp.v[i]);
+          double a = std::fabs(fp.a[i]);
+          double k = std::fabs(fp.c[i]);
+
+          // 1) Hard Cut Check: 심각한 위반 시 폐기
+          if (v > max_speed_ * hard_speed_factor ||
+              a > max_accel_ * hard_accel_factor ||
+              k > max_curvature_ * hard_curvature_factor) {
+            hard_invalid = true;
+            break;
+          }
+
+          // 2) Soft Penalty: Limit 초과분에 대한 제곱 비례 벌점 부과
+          double v_excess = std::max(0.0, v - max_speed_);
+          double a_excess = std::max(0.0, a - max_accel_);
+          double k_excess = std::max(0.0, k - max_curvature_);
+
+          if (v_excess > 0.0) penalty += w_v_viol * v_excess * v_excess;
+          if (a_excess > 0.0) penalty += w_a_viol * a_excess * a_excess;
+          if (k_excess > 0.0) penalty += w_k_viol * k_excess * k_excess;
       }
-      if (!valid) {
+
+      if (hard_invalid) {
         fp.cf = std::numeric_limits<double>::infinity();
         continue;
       }
@@ -553,19 +579,20 @@ private:
         J_lon += fp.s_dd[i] * fp.s_dd[i];
       }
 
-      double cost_lat = J_lat;
-      double cost_lon = J_lon
-                      + (target_speed_ - fp.v.back())
-                        * (target_speed_ - fp.v.back());
-      double cost_d   = fp.d.back() * fp.d.back();  // 레인 중앙(0) 선호
+      double cost_lat = kJ * J_lat + kLat * J_lat; // Simplified tuning
+      double cost_lon = kLon * J_lon
+                      + kLon * (target_speed_ - fp.v.back())
+                             * (target_speed_ - fp.v.back());
+      double cost_d   = kD * fp.d.back() * fp.d.back();  // 레인 중앙(0) 선호
 
       double cost_obs = 0.0;
       if (min_dist < soft_radius) {
         const double d_obs = std::max(min_dist, 0.1);
         cost_obs = k_obs * (1.0 / d_obs);
       }
-
-      fp.cf = cost_lat + cost_lon + cost_d + cost_obs;
+    
+      // [핵심 변경] penalty를 총 비용에 추가
+      fp.cf = cost_lat + cost_lon + cost_d + cost_obs + penalty;
     }
 
     // 4. 최소 비용 경로 선택
@@ -580,6 +607,7 @@ private:
 
     if (best_fp == nullptr || !std::isfinite(min_cost)) {
       // 모든 경로가 충돌/제약 위반이면 → 그냥 제자리 정지 경로 생성
+      // (Soft Constraint 적용으로 인해 이 상황은 현저히 줄어듦)
       local_wps.clear();
       Waypoint wp;
       wp.x = x;
