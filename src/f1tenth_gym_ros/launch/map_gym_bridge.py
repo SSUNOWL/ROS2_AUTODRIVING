@@ -28,27 +28,37 @@ def generate_launch_description():
         default_value='.png',
         description='Map image file extension (.png or .pgm)'
     )
+    
+    # [추가] RViz 실행 여부 (기본값: true)
+    use_rviz_arg = DeclareLaunchArgument(
+        'use_rviz',
+        default_value='true',
+        description='Whether to launch RViz2 (true/false)'
+    )
 
-    # 2. 경로 설정
+    # 2. 설정
     sim_config_path = os.path.join(gym_package_share, 'config', 'sim.yaml')
     
     map_name_config = LaunchConfiguration('map_name')
     num_agent_config = LaunchConfiguration('num_agent')
     map_img_ext_config = LaunchConfiguration('map_img_ext') 
+    use_rviz_config = LaunchConfiguration('use_rviz') # [추가]
 
-    # 맵 경로 동적 생성
+    # 경로 동적 생성
     map_path_no_ext = PathJoinSubstitution([gym_package_share, 'maps', map_name_config])
     
-    # 맵 YAML 파일 경로
     map_yaml_file = PathJoinSubstitution([
         gym_package_share, 'maps', 
         PythonExpression(["'", map_name_config, ".yaml'"]) 
     ])
 
-    # Opponent 존재 여부 조건 (State Publisher용)
+    # 조건 생성
     has_opp_condition = IfCondition(
         PythonExpression([num_agent_config, " > 1"])
     )
+    
+    # [추가] RViz 실행 조건
+    rviz_condition = IfCondition(use_rviz_config)
 
     # 3. 노드 정의
 
@@ -81,8 +91,7 @@ def generate_launch_description():
         ]
     )
     
-    # (3) [수정됨] RViz (조건부 설정 파일 로드)
-    # num_agent가 1보다 크면 'gym_bridge_opp.rviz'를, 아니면 'gym_bridge.rviz'를 로드
+    # (3) RViz (조건부 실행 적용됨)
     rviz_config_file_name = PythonExpression([
         "'gym_bridge_opp.rviz' if int(", num_agent_config, ") > 1 else 'gym_bridge.rviz'"
     ])
@@ -95,9 +104,9 @@ def generate_launch_description():
         package='rviz2',
         executable='rviz2',
         name='rviz',
-        # 동적으로 결정된 config 경로를 사용
         arguments=['-d', rviz_config_path],
-        output='screen'
+        output='screen',
+        condition=rviz_condition # [핵심] use_rviz가 true일 때만 실행
     )
 
     # (4) Lifecycle Manager
@@ -122,8 +131,6 @@ def generate_launch_description():
         remappings=[('/robot_description', 'ego_robot_description')]
     )
 
-    # 이미 작성하신 부분 (정상 작동함): Opponent용 State Publisher
-    # 토픽: /opp_robot_description 으로 발행됨
     opp_robot_publisher = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
@@ -137,10 +144,12 @@ def generate_launch_description():
         map_name_arg,
         num_agent_arg,
         map_img_ext_arg,
-        rviz_node,
+        use_rviz_arg, # [추가]
+        
         bridge_node,
-        nav_lifecycle_node,
         map_server_node,
+        rviz_node, # 조건부 실행
+        nav_lifecycle_node,
         ego_robot_publisher,
         opp_robot_publisher
     ])

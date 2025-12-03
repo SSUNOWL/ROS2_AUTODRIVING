@@ -8,6 +8,8 @@
 #include <vector>
 #include <iomanip>
 #include <filesystem>
+#include <iostream>
+#include <sstream>
 
 #include "rclcpp/rclcpp.hpp"
 #include "nav_msgs/msg/odometry.hpp"
@@ -50,7 +52,7 @@ public:
     create_log_file();
 
     current_state_ = WAITING_FOR_PATH;
-    start_time_ = rclcpp::Time(0);
+    start_time_ = this->now(); 
     has_left_start_ = false;
 
     max_speed_ = 0.0;
@@ -61,7 +63,7 @@ public:
     cnt_fgm_ = 0;
     cnt_total_ = 0;
     
-    stuck_timer_start_ = rclcpp::Time(0);
+    stuck_timer_start_ = this->now();
     
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
       "/ego_racecar/odom", 50, std::bind(&RunLogger::odom_callback, this, _1));
@@ -78,21 +80,12 @@ public:
     RCLCPP_INFO(get_logger(), "RunLogger initialized. Stuck timeout: %.1fs", stuck_timeout_);
   }
 
-  // [수정됨] 소멸자에서 강제 종료 처리
   ~RunLogger()
   {
-    // 만약 프로그램이 종료되는데(Ctrl+C), 상태가 아직 FINISHED가 아니라면
-    // 강제로 로그를 마무리하고 요약본을 출력합니다.
-    if (current_state_ == RUNNING || current_state_ == READY) {
-        // 소멸자 내부에서는 ROS Time을 쓰기 어려울 수 있으므로 예외처리
-        try {
-            finish_logging("MANUAL_ABORT (Ctrl+C)", false); // false = shutdown 호출 안 함
-        } catch (...) {
-            std::cout << "[RunLogger] Saved log during shutdown.\n";
-        }
+    // 강제 종료(Ctrl+C) 시에도 로그 저장 및 요약 추가
+    if (current_state_ != FINISHED) {
+        finish_logging("MANUAL_ABORT (Force Quit)", false); 
     }
-
-    if (ofs_.is_open()) ofs_.close();
   }
 
 private:
@@ -231,42 +224,75 @@ private:
     }
   }
 
-  // [수정됨] trigger_shutdown 파라미터 추가
-  // Ctrl+C로 종료될 때는 이미 셧다운 중이므로 rclcpp::shutdown()을 부르면 안 됨.
+  // [수정됨] CSV 파일 마지막에 요약 정보 추가 (Append Mode)
   void finish_logging(const std::string& reason, bool trigger_shutdown = true)
   {
     if (current_state_ == FINISHED) return;
     current_state_ = FINISHED;
     
-    if (ofs_.is_open()) ofs_.close();
+    // 1. 데이터 기록 종료 (파일 닫기)
+    if (ofs_.is_open()) {
+        ofs_.close();
+    }
     
+    // 2. Duration 계산
     double duration = 0.0;
-    // rclcpp context가 살아있을 때만 시간 계산
-    if (rclcpp::ok()) {
-        try {
+    try {
+        if (rclcpp::ok()) {
             duration = (this->now() - start_time_).seconds();
-        } catch (...) {
-            duration = 0.0;
+        } else {
+             duration = 0.0; 
         }
+    } catch (...) {
+        duration = 0.0;
+    }
+    
+    // 3. 통계 계산
+    double frenet_ratio = (cnt_total_ > 0) ? (double)cnt_frenet_ / cnt_total_ * 100.0 : 0.0;
+    double fgm_ratio    = (cnt_total_ > 0) ? (double)cnt_fgm_ / cnt_total_ * 100.0 : 0.0;
+
+    // [핵심] 4. 파일을 '추가 모드(Append)'로 다시 열어서 요약 정보 쓰기
+    std::ofstream summary_ofs(filename_, std::ios::app);
+    if (summary_ofs.is_open()) {
+        summary_ofs << "\n" // 데이터와 구분하기 위한 빈 줄
+                    << "--- Experiment Summary ---\n"
+                    << "Scenario," << scenario_name_ << "\n"
+                    << "Mode," << planner_mode_ << "\n"
+                    << "Finish Reason," << reason << "\n"
+                    << "Duration (s)," << std::fixed << std::setprecision(2) << duration << "\n"
+                    << "Total Dist (m)," << total_dist_ << "\n"
+                    << "Max Speed (m/s)," << max_speed_ << "\n"
+                    << "Max Lat Acc (m/s^2)," << max_a_lat_ << "\n"
+                    << "Collision," << (is_collision_ ? "YES" : "NO") << "\n"
+                    << "FRENET Usage (%)," << frenet_ratio << "\n"
+                    << "FGM Usage (%)," << fgm_ratio << "\n";
+        
+        summary_ofs.close();
+        std::cout << "[RunLogger] Summary appended to CSV file.\n";
+    } else {
+        std::cout << "[RunLogger] Failed to open CSV for summary append.\n";
     }
 
+    // 5. 파일 이름 변경 (Duration 포함)
     try {
         fs::path old_path(filename_);
         std::stringstream ss;
         ss << std::fixed << std::setprecision(2) << duration;
+        
         std::string new_filename = old_path.stem().string() + "_dur_" + ss.str() + "s" + old_path.extension().string();
         fs::path new_path = old_path.parent_path() / new_filename;
 
         fs::rename(old_path, new_path);
         filename_ = new_path.string();
     } catch (const std::exception& e) {
-        std::cout << "[RunLogger] Error renaming file: " << e.what() << "\n";
+        std::cout << "[RunLogger] Warning: Could not rename log file: " << e.what() << "\n";
     }
 
+    // 콘솔에도 출력
     print_summary(reason, duration);
     
-    // 내부 로직(충돌, 목표 도달)에 의한 종료일 때만 시스템 셧다운 트리거
     if (trigger_shutdown && rclcpp::ok()) {
+        RCLCPP_INFO(get_logger(), "Requesting System Shutdown...");
         rclcpp::shutdown();
     }
   }
@@ -276,7 +302,6 @@ private:
     double frenet_ratio = (cnt_total_ > 0) ? (double)cnt_frenet_ / cnt_total_ * 100.0 : 0.0;
     double fgm_ratio    = (cnt_total_ > 0) ? (double)cnt_fgm_ / cnt_total_ * 100.0 : 0.0;
 
-    // Ctrl+C 종료 시 ROS 로그가 안 보일 수 있으므로 std::cout 사용
     std::cout << "\n========================================\n";
     std::cout << " [RunLogger] Experiment Result Summary \n";
     std::cout << "========================================\n";
@@ -291,12 +316,6 @@ private:
     std::cout << " [Planner Usage Ratio]\n";
     std::cout << " FRENET        : " << frenet_ratio << " %\n";
     std::cout << " FGM           : " << fgm_ratio << " %\n";
-    std::cout << "----------------------------------------\n";
-    std::cout << " [MUX Weights Used]\n";
-    std::cout << " w_speed       : " << w_speed_ << "\n";
-    std::cout << " w_track       : " << w_track_ << "\n";
-    std::cout << " w_comfort     : " << w_comfort_ << "\n";
-    std::cout << " w_safety      : " << w_safety_ << "\n";
     std::cout << "========================================\n";
     std::cout << " Log Saved to  : " << filename_ << "\n";
     std::cout << "========================================\n\n";
