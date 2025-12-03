@@ -35,7 +35,6 @@ ros2 launch f1tenth_gym_ros map_gym_bridge.py   map_name:=Spielberg_map   num_ag
 (/plan 발행)
 ros2 run racecar_experiments static_path_publisher   --ros-args -p csv_path:="$(pwd)/raceline_with_yaw.csv"
 (frenet with pp실행)
-ros2 launch racecar_frenet_cpp frenet_with_pp.launch.py   max_speed:=7.0 max_accel:=6.0 max_curvature:=0.9 target_speed:=8.0  pp_max_speed:=7.0 pp_use_frenet_path:=true   pp_frenet_path_topic:=/frenet_local_plan
 (logger 실행 + collision ) -> logger가 이제 timer랑 역할이 똑같음
 logger는 .csv 만들어지고 평균, 최대 값들 최종 로그 출력함
 ros2 launch racecar_experiments experiment_logger.launch.py     scenario_name:=spielberg     planner_mode:=FRENET     output_dir:=$(pwd)/logs     collision_topic:=/experiments/crash_detected

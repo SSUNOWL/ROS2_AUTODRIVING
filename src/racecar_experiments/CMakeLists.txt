@@ -14,6 +14,10 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(ackermann_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
@@ -43,8 +47,8 @@ ament_target_dependencies(static_path_publisher rclcpp nav_msgs geometry_msgs)
 add_executable(run_logger src/run_logger.cpp)
 ament_target_dependencies(run_logger rclcpp nav_msgs geometry_msgs)
 
-add_executable(opponent_trajectory_recorder
-    src/opponent_trajectory_recorder.cpp
+add_executable(oppteleop_recorder
+    src/oppteleop_recorder.cpp
 )
 
 add_executable(opponent_replay_node
@@ -54,7 +58,23 @@ add_executable(opponent_replay_node
 ament_target_dependencies(opponent_replay_node ackermann_msgs rclcpp nav_msgs )
 
 
-ament_target_dependencies(opponent_trajectory_recorder rclcpp nav_msgs )
+ament_target_dependencies(oppteleop_recorder ackermann_msgs rclcpp nav_msgs )
+
+
+add_executable(opponent_pure_pursuit_node
+    src/opponent_pure_pursuit_node.cpp
+)
+
+ament_target_dependencies(opponent_pure_pursuit_node   
+  rclcpp
+  nav_msgs
+  geometry_msgs
+  ackermann_msgs
+  visualization_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+ )
 
 install(TARGETS
   collision_monitor
@@ -62,8 +82,9 @@ install(TARGETS
   path_saver
   static_path_publisher
   run_logger
-  opponent_trajectory_recorder
+  oppteleop_recorder
   opponent_replay_node
+  opponent_pure_pursuit_node
 
   DESTINATION lib/${PROJECT_NAME})
 
