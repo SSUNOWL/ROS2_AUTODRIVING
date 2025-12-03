@@ -326,13 +326,29 @@ private:
         std::cout << "[RunLogger] Failed to open CSV for summary append.\n";
     }
 
-    // 5. 파일 이름 변경 (Duration 포함)
+    // 5. 파일 이름 변경 (Reason 태그 + Duration 포함)
     try {
         fs::path old_path(filename_);
         std::stringstream ss;
         ss << std::fixed << std::setprecision(2) << duration;
         
-        std::string new_filename = old_path.stem().string() + "_dur_" + ss.str() + "s" + old_path.extension().string();
+        // 결과 상태 태그 결정
+        std::string status_tag = "_ABORT"; // 기본값 (강제종료 등)
+
+        if (reason.find("GOAL") != std::string::npos) {
+            status_tag = "_GOAL";
+        } else if (reason.find("COLLISION") != std::string::npos) {
+            status_tag = "_CRASH";
+        } else if (reason.find("STUCK") != std::string::npos) {
+            status_tag = "_STUCK";
+        }
+
+        // 파일명 생성: 기존이름 + 상태태그 + _dur_ + 시간 + .csv
+        std::string new_filename = old_path.stem().string() 
+                                 + status_tag 
+                                 + "_dur_" + ss.str() + "s" 
+                                 + old_path.extension().string();
+                                 
         fs::path new_path = old_path.parent_path() / new_filename;
 
         fs::rename(old_path, new_path);

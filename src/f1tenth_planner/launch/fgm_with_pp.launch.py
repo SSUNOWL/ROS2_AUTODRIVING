@@ -7,7 +7,9 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    # ===== FGM 기본 파라미터 =====
+    # =========================================
+    # 1. FGM 파라미터 인자 (튜닝용 포함)
+    # =========================================
     fgm_gap_threshold_arg = DeclareLaunchArgument(
         'fgm_gap_threshold', default_value='1.2',
         description='FGM: gap 최소 폭 (m)'
@@ -21,7 +23,7 @@ def generate_launch_description():
         description='FGM: 전방 시야 각도 (deg)'
     )
 
-    # ===== [NEW] 추가된 튜닝 파라미터 =====
+    # [NEW] FGM 튜닝 파라미터들
     fgm_speed_check_fov_deg_arg = DeclareLaunchArgument(
         'fgm_speed_check_fov_deg', default_value='30.0',
         description='속도 제어를 위해 전방을 감지하는 각도 (deg)'
@@ -59,65 +61,44 @@ def generate_launch_description():
         description='속도에 따른 버블 반경 증가 계수'
     )
 
-    # ===== Planning & Lookahead =====
-    fgm_min_plan_arg = DeclareLaunchArgument(
-        'fgm_min_planning_dist', default_value='2.0'
-    )
-    fgm_max_plan_arg = DeclareLaunchArgument(
-        'fgm_max_planning_dist', default_value='5.0'
-    )
-    fgm_plan_gain_arg = DeclareLaunchArgument(
-        'fgm_planning_gain', default_value='1.0'
-    )
+    # Planning & Lookahead & Speed (FGM 내부용)
+    fgm_min_plan_arg = DeclareLaunchArgument('fgm_min_planning_dist', default_value='2.0')
+    fgm_max_plan_arg = DeclareLaunchArgument('fgm_max_planning_dist', default_value='5.0')
+    fgm_plan_gain_arg = DeclareLaunchArgument('fgm_planning_gain', default_value='1.0')
 
-    fgm_min_look_arg = DeclareLaunchArgument(
-        'fgm_min_lookahead', default_value='1.5'
-    )
-    fgm_max_look_arg = DeclareLaunchArgument(
-        'fgm_max_lookahead', default_value='3.5'
-    )
-    fgm_look_gain_arg = DeclareLaunchArgument(
-        'fgm_lookahead_gain', default_value='0.6'
-    )
+    fgm_min_look_arg = DeclareLaunchArgument('fgm_min_lookahead', default_value='1.5')
+    fgm_max_look_arg = DeclareLaunchArgument('fgm_max_lookahead', default_value='3.5')
+    fgm_look_gain_arg = DeclareLaunchArgument('fgm_lookahead_gain', default_value='0.6')
 
-    # ===== Speed =====
-    fgm_max_speed_arg = DeclareLaunchArgument(
-        'fgm_max_speed', default_value='4.0',
-        description='FGM 내부 속도 상한'
-    )
-    fgm_min_speed_arg = DeclareLaunchArgument(
-        'fgm_min_speed', default_value='2.0'
-    )
-    fgm_slow_down_arg = DeclareLaunchArgument(
-        'fgm_slow_down_dist', default_value='2.5',
-        description='감속 시작 거리 (m)'
-    )
+    fgm_max_speed_arg = DeclareLaunchArgument('fgm_max_speed', default_value='4.0')
+    fgm_min_speed_arg = DeclareLaunchArgument('fgm_min_speed', default_value='2.0')
+    fgm_slow_down_arg = DeclareLaunchArgument('fgm_slow_down_dist', default_value='2.5')
 
-    # ===== Pure Pursuit 파라미터 인자 =====
+    # =========================================
+    # 2. Pure Pursuit 파라미터 인자
+    # =========================================
     pp_csv_path_arg = DeclareLaunchArgument(
         'pp_csv_path', default_value='raceline_with_speed.csv',
         description='CSV 기반 주행시 사용할 경로 파일'
     )
-    pp_lookahead_min_arg = DeclareLaunchArgument(
-        'pp_lookahead_min', default_value='1.0'
-    )
-    pp_lookahead_gain_arg = DeclareLaunchArgument(
-        'pp_lookahead_gain', default_value='0.3'
-    )
-    pp_wheelbase_arg = DeclareLaunchArgument(
-        'pp_wheelbase', default_value='0.33'
-    )
+    pp_lookahead_min_arg = DeclareLaunchArgument('pp_lookahead_min', default_value='1.0')
+    pp_lookahead_gain_arg = DeclareLaunchArgument('pp_lookahead_gain', default_value='0.3')
+    pp_wheelbase_arg = DeclareLaunchArgument('pp_wheelbase', default_value='0.33')
+    
+    # [핵심] PP Max Speed 연동
     pp_max_speed_arg = DeclareLaunchArgument(
-        'pp_max_speed', default_value='4.0'
+        'pp_max_speed', default_value='4.0',
+        description='Pure Pursuit: 최대 주행 속도 (m/s)'
     )
-    pp_use_frenet_path_arg = DeclareLaunchArgument(
-        'pp_use_frenet_path', default_value='true'
-    )
-    pp_frenet_topic_arg = DeclareLaunchArgument(
-        'pp_frenet_path_topic', default_value='/fgm_path'
-    )
+    
+    pp_use_frenet_path_arg = DeclareLaunchArgument('pp_use_frenet_path', default_value='true')
+    pp_frenet_topic_arg = DeclareLaunchArgument('pp_frenet_path_topic', default_value='/fgm_path')
 
-    # ===== FGM Node =====
+    # =========================================
+    # 3. 노드 정의
+    # =========================================
+    
+    # FGM Node
     fgm_node = Node(
         package='f1tenth_planner',
         executable='fgm_node',
@@ -128,7 +109,7 @@ def generate_launch_description():
             'bubble_radius':       LaunchConfiguration('fgm_bubble_radius'),
             'fov_angle':           LaunchConfiguration('fgm_fov_angle'),
 
-            # [NEW] 전달되는 추가 파라미터들
+            # 튜닝 파라미터 매핑
             'speed_check_fov_deg': LaunchConfiguration('fgm_speed_check_fov_deg'),
             'required_clearance':  LaunchConfiguration('fgm_required_clearance'),
             'width_weight':        LaunchConfiguration('fgm_width_weight'),
@@ -153,7 +134,7 @@ def generate_launch_description():
         }]
     )
 
-    # ===== Pure Pursuit Node =====
+    # Pure Pursuit Node
     pp_node = Node(
         package='f1tenth_planner',
         executable='pure_pursuit_node',
@@ -164,19 +145,22 @@ def generate_launch_description():
             'lookahead_min':   LaunchConfiguration('pp_lookahead_min'),
             'lookahead_gain':  LaunchConfiguration('pp_lookahead_gain'),
             'wheelbase':       LaunchConfiguration('pp_wheelbase'),
+            
+            # [핵심] Launch Argument 'pp_max_speed'를 노드 파라미터 'max_speed'로 매핑
             'max_speed':       LaunchConfiguration('pp_max_speed'),
+            
             'use_frenet_path': LaunchConfiguration('pp_use_frenet_path'),
             'frenet_path_topic': LaunchConfiguration('pp_frenet_path_topic'),
         }]
     )
 
     return LaunchDescription([
-        # Args - Basic
+        # Args - FGM Basic
         fgm_gap_threshold_arg,
         fgm_bubble_radius_arg,
         fgm_fov_angle_arg,
         
-        # Args - New Tuning Params
+        # Args - FGM Tuning
         fgm_speed_check_fov_deg_arg,
         fgm_required_clearance_arg,
         fgm_width_weight_arg,
@@ -187,7 +171,7 @@ def generate_launch_description():
         fgm_smoothing_alpha_arg,
         fgm_dynamic_bubble_speed_coeff_arg,
 
-        # Args - Existing
+        # Args - FGM Path/Speed
         fgm_min_plan_arg,
         fgm_max_plan_arg,
         fgm_plan_gain_arg,
@@ -197,11 +181,13 @@ def generate_launch_description():
         fgm_max_speed_arg,
         fgm_min_speed_arg,
         fgm_slow_down_arg,
+        
+        # Args - Pure Pursuit
         pp_csv_path_arg,
         pp_lookahead_min_arg,
         pp_lookahead_gain_arg,
         pp_wheelbase_arg,
-        pp_max_speed_arg,
+        pp_max_speed_arg,        # 추가됨
         pp_use_frenet_path_arg,
         pp_frenet_topic_arg,
 

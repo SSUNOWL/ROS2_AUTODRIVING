@@ -33,17 +33,24 @@ ros2 launch planner_mux time_trial.launch.py \
 ros2 run racecar_experiments path_timer
 
 
-<테스트 시나리오 2> 마주오는 자동차 회피시나리오 -> 상대차가 휘청거림
+<테스트 시나리오 2> 마주오는 자동차 회피시나리오 -> 
 ros2 launch f1tenth_gym_ros map_gym_bridge.py map_name:=playground num_agent:=2 map_img_ext:=.pgm
 
 ros2 run racecar_experiments static_path_publisher   --ros-args -p csv_path:="$(pwd)/raceline_playground.csv" -p opponent_csv_path:="$(pwd)/bumper_v_2.csv" -p spawn_opponent_enabled:=true
-(가중치 설정 필요)
-ros2 launch f1tenth_planner fgm_with_pp.launch.py
 
 ros2 run racecar_experiments opponent_pure_pursuit_node   --ros-args   -p csv_path:="$(pwd)/bumper_v_2.csv"   -p odom_topic:="/opp_racecar/odom"   -p drive_topic:="/opp_drive"   -p max_speed:=5.0
 (v=2, 3, 4, 5)
+bumper_v_2  (마주보는거 회피)
+bumper_slow_1 (같은방향 추월)
 
+ros2 launch f1tenth_planner fgm_with_pp.launch.py \ fgm_gap_threshold:=1.2 \ fgm_bubble_radius:=0.5 \ fgm_fov_angle:=180.0 \ fgm_speed_check_fov_deg:=25.0 \ fgm_required_clearance:=0.55 \ fgm_width_weight:=0.6 \ fgm_angle_weight:=6.0 \ fgm_steer_weight:=0.08 \ fgm_hysteresis_bonus:=2.0 \ fgm_change_threshold:=0.25 \ fgm_smoothing_alpha:=0.5 \ fgm_dynamic_bubble_speed_coeff:=0.12
 
+ros2 launch racecar_experiments experiment_logger.launch.py     scenario_name:=bumper     planner_mode:=FGM     output_dir:=$(pwd)/logs     collision_topic:=/experiments/crash_detected
+
+ㄴ 이걸로 파라미터 튜닝 ㄱㄱ
+초반 몇개는 이걸로 값 가져오고
+파라미터 로 팔만대장경 만들어서 자동화
+이후 ./fgm_batch_run.sh
 
 <테스트 시나리오 3> 수동차 나란히 주행 (네모난걸 만들어서 주행)
 ros2 launch f1tenth_gym_ros map_gym_bridge.py num_agent:=2
