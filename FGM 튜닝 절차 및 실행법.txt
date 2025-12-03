@@ -1,0 +1,51 @@
+<FGM 튜닝 절차>
+터미널 1 - 시뮬레이터
+ros2 launch f1tenth_gym_ros map_gym_bridge.py   map_name:=Spielberg_map   num_agent:=1
+
+ros2 launch f1tenth_gym_ros map_gym_bridge.py map_name:=360map num_agent:=1 map_img_ext:=.pgm
+
+
+터미널 2 - 전역 경로 및 차량 위치 초기화
+ros2 run racecar_experiments static_path_publisher   --ros-args -p csv_path:="$(pwd)/raceline_with_yaw.csv"
+
+ros2 run racecar_experiments static_path_publisher   --ros-args -p csv_path:="$(pwd)/180wind.csv"
+
+
+터미널 3 - fgm 알고리즘 (튜닝값 적용)
+ros2 launch f1tenth_planner fgm_with_pp.launch.py   fgm_gap_threshold:=1.05   fgm_bubble_radius:=0.46   fgm_fov_angle:=180.0   fgm_min_planning_dist:=2.0   fgm_max_planning_dist:=5.0   fgm_planning_gain:=1.0   fgm_min_lookahead:=1.7   fgm_max_lookahead:=3.7   fgm_lookahead_gain:=0.55   fgm_max_speed:=5.2   fgm_min_speed:=2.0   fgm_slow_down_dist:=2.00   pp_csv_path:=raceline_with_yaw.csv   pp_lookahead_min:=1.2   pp_lookahead_gain:=0.35   pp_wheelbase:=0.33   pp_max_speed:=5.2   pp_use_frenet_path:=true   pp_frenet_path_topic:=/fgm_path
+
+터미널 4 - 기록 및 저장
+ros2 launch racecar_experiments experiment_logger.launch.py     scenario_name:=180    planner_mode:=FGM     output_dir:=$(pwd)/logs     collision_topic:=/experiments/crash_detected
+
+
+
+
+
+
+FGM 실행
+=============================================================
+
+터미널 1 - 시뮬레이터
+ros2 launch f1tenth_gym_ros map_gym_bridge.py   map_name:=Spielberg_map   num_agent:=1
+
+ros2 launch f1tenth_gym_ros map_gym_bridge.py map_name:=360map num_agent:=1 map_img_ext:=.pgm
+
+* 주행 노드 (safe / balanced / race 파라미터 선택)
+<360map>
+터미널 2 - 출발지 위치
+ros2 run racecar_experiments static_path_publisher   --ros-args -p csv_path:="$(pwd)/180wind.csv"
+
+터미널 3 - 주행
+ros2 launch f1tenth_planner fgm_with_pp_profile.launch.py \
+  track:=360 profile:=balanced
+
+<Spielberg_map>
+터미널 2 - 출발지 위치
+ros2 run racecar_experiments static_path_publisher   --ros-args -p csv_path:="$(pwd)/raceline_with_yaw.csv"
+
+터미널 3 - 주행
+ros2 launch f1tenth_planner fgm_with_pp_profile.launch.py \
+  track:=spielberg profile:=balanced
+
+
+
