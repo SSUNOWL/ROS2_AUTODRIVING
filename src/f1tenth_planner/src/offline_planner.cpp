@@ -170,18 +170,46 @@ private:
             fs::path yaml_dir = fs::path(yaml_path).parent_path();
             fs::path image_path = yaml_dir / image_name;
 
-            map_info_.image = cv::imread(image_path.string(), cv::IMREAD_GRAYSCALE);
-            if (map_info_.image.empty()) return false;
-            
+            // [변경 1] 이미지를 컬러(Color)로 읽어옵니다.
+            cv::Mat src_image = cv::imread(image_path.string(), cv::IMREAD_COLOR);
+            if (src_image.empty()) {
+                RCLCPP_ERROR(this->get_logger(), "Failed to load image: %s", image_path.string().c_str());
+                return false;
+            }
+
+            // [변경 2] BGR -> HSV 변환 (색상 분리를 위해)
+            cv::Mat hsv_image;
+            cv::cvtColor(src_image, hsv_image, cv::COLOR_BGR2HSV);
+
+            // [변경 3] '하얀색'의 범위를 지정합니다.
+            // HSV에서 흰색은: 
+            // Hue(색상): 상관없음 (0~180)
+            // Saturation(채도): 낮아야 함 (0~40, 색이 옅음)
+            // Value(명도): 높아야 함 (200~255, 아주 밝음)
+            cv::Scalar lower_white(0, 0, 200);   
+            cv::Scalar upper_white(180, 50, 255); 
+
+            // 지정한 범위 안의 색(흰색)만 255(흰색)로, 나머지는 0(검은색)으로 만듭니다.
+            cv::Mat mask;
+            cv::inRange(hsv_image, lower_white, upper_white, mask);
+
+            // [옵션] 노이즈 제거 (자잘한 흰 점 제거)
+            // 커널 크기를 조절하여 잡음을 없앨 수 있습니다.
+            cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
+            cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
+
+            // 최종적으로 인식된 맵 저장
+            map_info_.image = mask.clone(); 
             map_info_.width = map_info_.image.cols;
             map_info_.height = map_info_.image.rows;
 
-            cv::Mat binary_map;
-            cv::threshold(map_info_.image, binary_map, 200, 255, cv::THRESH_BINARY);
-            
-            cv::distanceTransform(binary_map, map_info_.dist_field, cv::DIST_L2, 5);
+            // 거리 필드 생성 (경로 최적화용)
+            // mask 이미지는 이미 흰색(255)이 길, 검은색(0)이 벽이므로 바로 사용 가능
+            cv::distanceTransform(map_info_.image, map_info_.dist_field, cv::DIST_L2, 5);
 
+            RCLCPP_INFO(this->get_logger(), "Map loaded successfully with HSV filtering.");
             return true;
+
         } catch (const std::exception& e) {
             RCLCPP_ERROR(this->get_logger(), "YAML Error: %s", e.what());
             return false;

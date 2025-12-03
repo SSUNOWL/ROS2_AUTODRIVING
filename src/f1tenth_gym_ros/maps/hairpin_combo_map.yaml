@@ -1,0 +1,6 @@
+image: hairpin_combo_map.pgm     # 지금 쓰고 있는 이미지 파일 이름
+resolution: 0.05                # [m/pixel] → 약 20m x 15m 맵
+origin: [-5.0, -5.0, 0.0]          # (x, y, yaw), 필요하면 나중에 조정
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196
