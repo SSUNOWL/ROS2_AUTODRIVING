@@ -9,7 +9,6 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
-find_package(planner_mux_msgs REQUIRED)        
 
 add_executable(planner_mux_node src/planner_mux_node.cpp)
 
@@ -17,7 +16,6 @@ ament_target_dependencies(planner_mux_node
   rclcpp
   nav_msgs
   sensor_msgs
-  planner_mux_msgs                             
 )
 
 install(TARGETS
