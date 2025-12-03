@@ -1,0 +1,2 @@
+t,x,y,yaw,speed,yaw_rate,a_lat,planner,min_d,track_error,collision
+0.000102328,-75.7538,52.8966,-1.48757,0.116266,0,0,FRENET,0.4,0.2,0

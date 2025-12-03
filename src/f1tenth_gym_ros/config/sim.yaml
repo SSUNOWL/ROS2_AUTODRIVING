@@ -38,6 +38,6 @@ bridge:
     sx1: 3.65681
     sy1: -6.17649
     stheta1: -3.12537
-    
+      
     # teleop
     kb_teleop: False

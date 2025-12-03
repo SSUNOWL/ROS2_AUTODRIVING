@@ -2,17 +2,20 @@
 의도: 
 터미널 1 기본값 (지도: Spielberg_map, robot = 1)
 ros2 launch f1tenth_gym_ros map_gym_bridge.py
-터미널2 (static publisehr, frenet, fgm, mux, pp, collision)
+터미널2 (static publisehr, frenet, fgm, mux, pp, collision, logger)
+launch 파라미터 = frenet, pp 의 프로필 선택, (상대차가 있는경우 csv파일), pp가 어떤 경로만 받는지 (기본값 = /selected_path)
+static publisher-> 상대차 csv파일을 읽고 시작위치를 정해줌
+
+
+ros2 launch planner_mux time_trial_mux.launch.py
+
+
 (기본값 mux)
 ros2 launch planner_mux time_trial.launch.py  
 (frenet only)
 ros2 launch planner_mux time_trial.launch.py pp_path_topic:=/frenet_local_plan 
 (fgm only)
 ros2 launch planner_mux time_trial.launch.py pp_path_topic:=/fgm_path  
-
-터미널 3 (timer)
-ros2 run racecar_experiments path_timer
-
 
 <테스트 시나리오 1> 180, 90도 코너링
 의도: 급격한 회전에서 잘가는가?
@@ -33,7 +36,7 @@ ros2 run racecar_experiments path_timer
 <테스트 시나리오 2> 마주오는 자동차 회피시나리오 -> 상대차가 휘청거림
 ros2 launch f1tenth_gym_ros map_gym_bridge.py map_name:=test_scenarios num_agent:=2 map_img_ext:=.pgm
 
-ros2 run racecar_experiments static_path_publisher   --ros-args -p csv_path:="$(pwd)/bumper.csv"
+  ros2 run racecar_experiments static_path_publisher   --ros-args -p csv_path:="$(pwd)/bumper.csv"
 
 ros2 launch racecar_frenet_cpp frenet_with_pp_profile.launch.py
 
