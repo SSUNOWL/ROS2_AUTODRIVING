@@ -7,7 +7,7 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    # ===== FGM 파라미터 인자 =====
+    # ===== FGM 기본 파라미터 =====
     fgm_gap_threshold_arg = DeclareLaunchArgument(
         'fgm_gap_threshold', default_value='1.2',
         description='FGM: gap 최소 폭 (m)'
@@ -21,6 +21,45 @@ def generate_launch_description():
         description='FGM: 전방 시야 각도 (deg)'
     )
 
+    # ===== [NEW] 추가된 튜닝 파라미터 =====
+    fgm_speed_check_fov_deg_arg = DeclareLaunchArgument(
+        'fgm_speed_check_fov_deg', default_value='30.0',
+        description='속도 제어를 위해 전방을 감지하는 각도 (deg)'
+    )
+    fgm_required_clearance_arg = DeclareLaunchArgument(
+        'fgm_required_clearance', default_value='0.55',
+        description='주행시 벽이나 장애물로부터 확보할 물리적 거리 (m)'
+    )
+    fgm_width_weight_arg = DeclareLaunchArgument(
+        'fgm_width_weight', default_value='0.5',
+        description='Gap 너비에 대한 가중치'
+    )
+    fgm_angle_weight_arg = DeclareLaunchArgument(
+        'fgm_angle_weight', default_value='5.0',
+        description='글로벌 경로와의 각도 차이에 대한 페널티 가중치'
+    )
+    fgm_steer_weight_arg = DeclareLaunchArgument(
+        'fgm_steer_weight', default_value='0.1',
+        description='조향각 크기에 대한 페널티 가중치'
+    )
+    fgm_hysteresis_bonus_arg = DeclareLaunchArgument(
+        'fgm_hysteresis_bonus', default_value='2.0',
+        description='이전 경로 유지 시 부여하는 보너스 점수'
+    )
+    fgm_change_threshold_arg = DeclareLaunchArgument(
+        'fgm_change_threshold', default_value='0.3',
+        description='이전 각도와 유사하다고 판단하는 임계값 (rad)'
+    )
+    fgm_smoothing_alpha_arg = DeclareLaunchArgument(
+        'fgm_smoothing_alpha', default_value='0.4',
+        description='조향각 평활화 계수 (0~1)'
+    )
+    fgm_dynamic_bubble_speed_coeff_arg = DeclareLaunchArgument(
+        'fgm_dynamic_bubble_speed_coeff', default_value='0.1',
+        description='속도에 따른 버블 반경 증가 계수'
+    )
+
+    # ===== Planning & Lookahead =====
     fgm_min_plan_arg = DeclareLaunchArgument(
         'fgm_min_planning_dist', default_value='2.0'
     )
@@ -41,6 +80,7 @@ def generate_launch_description():
         'fgm_lookahead_gain', default_value='0.6'
     )
 
+    # ===== Speed =====
     fgm_max_speed_arg = DeclareLaunchArgument(
         'fgm_max_speed', default_value='4.0',
         description='FGM 내부 속도 상한'
@@ -88,6 +128,17 @@ def generate_launch_description():
             'bubble_radius':       LaunchConfiguration('fgm_bubble_radius'),
             'fov_angle':           LaunchConfiguration('fgm_fov_angle'),
 
+            # [NEW] 전달되는 추가 파라미터들
+            'speed_check_fov_deg': LaunchConfiguration('fgm_speed_check_fov_deg'),
+            'required_clearance':  LaunchConfiguration('fgm_required_clearance'),
+            'width_weight':        LaunchConfiguration('fgm_width_weight'),
+            'angle_weight':        LaunchConfiguration('fgm_angle_weight'),
+            'steer_weight':        LaunchConfiguration('fgm_steer_weight'),
+            'hysteresis_bonus':    LaunchConfiguration('fgm_hysteresis_bonus'),
+            'change_threshold':    LaunchConfiguration('fgm_change_threshold'),
+            'smoothing_alpha':     LaunchConfiguration('fgm_smoothing_alpha'),
+            'dynamic_bubble_speed_coeff': LaunchConfiguration('fgm_dynamic_bubble_speed_coeff'),
+
             'min_planning_dist':   LaunchConfiguration('fgm_min_planning_dist'),
             'max_planning_dist':   LaunchConfiguration('fgm_max_planning_dist'),
             'planning_gain':       LaunchConfiguration('fgm_planning_gain'),
@@ -120,10 +171,23 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        # Args
+        # Args - Basic
         fgm_gap_threshold_arg,
         fgm_bubble_radius_arg,
         fgm_fov_angle_arg,
+        
+        # Args - New Tuning Params
+        fgm_speed_check_fov_deg_arg,
+        fgm_required_clearance_arg,
+        fgm_width_weight_arg,
+        fgm_angle_weight_arg,
+        fgm_steer_weight_arg,
+        fgm_hysteresis_bonus_arg,
+        fgm_change_threshold_arg,
+        fgm_smoothing_alpha_arg,
+        fgm_dynamic_bubble_speed_coeff_arg,
+
+        # Args - Existing
         fgm_min_plan_arg,
         fgm_max_plan_arg,
         fgm_plan_gain_arg,
@@ -145,4 +209,3 @@ def generate_launch_description():
         fgm_node,
         pp_node,
     ])
-

@@ -85,11 +85,11 @@ cleanup_ros_nodes() {
     pkill -f "lifecycle_manager"
     pkill -f "robot_state_publisher"
     pkill -f "rviz2"
-    # 혹시 모를 auto_map 런치 프로세스도 종료
-    pkill -f "auto_map.launch.py"
+    # [수정됨] 변경된 map launch 파일 이름으로 종료
+    pkill -f "frenet_auto_map.launch.py"
 }
 
-echo "=== Auto Experiment Pipeline (Robust Cleanup) ==="
+echo "=== Frenet Experiment Pipeline (Robust Cleanup) ==="
 
 # 시작 전 한 번 청소
 cleanup_ros_nodes
@@ -107,8 +107,8 @@ for map_name in "${maps[@]}"; do
     echo "------------------------------------------------"
     echo ">>> Starting MAP: $map_name (Ext: $MAP_EXT)"
     
-    # 지도 실행 (백그라운드)
-    ros2 launch racecar_experiments auto_map.launch.py \
+    # [수정됨] frenet_auto_map.launch.py 실행
+    ros2 launch racecar_experiments frenet_auto_map.launch.py \
         map_name:=$map_name \
         map_img_ext:=$MAP_EXT &
     
@@ -122,9 +122,10 @@ for map_name in "${maps[@]}"; do
         read -r max_s target_s max_a max_c <<< "$params"
         
         echo ""
-        echo "   >>> Running Experiment: Params=[$params]"
+        echo "   >>> Running Frenet Experiment: Params=[$params]"
         
-        ros2 launch racecar_experiments auto_run.launch.py \
+        # [수정됨] frenet_auto_run.launch.py 실행
+        ros2 launch racecar_experiments frenet_auto_run.launch.py \
             map_name:=$map_name \
             max_speed:=$max_s \
             target_speed:=$target_s \
@@ -146,4 +147,4 @@ for map_name in "${maps[@]}"; do
     
 done
 
-echo "=== All Experiments Completed ==="
+echo "=== All Frenet Experiments Completed ==="

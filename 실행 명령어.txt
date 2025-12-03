@@ -34,13 +34,14 @@ ros2 run racecar_experiments path_timer
 
 
 <테스트 시나리오 2> 마주오는 자동차 회피시나리오 -> 상대차가 휘청거림
-ros2 launch f1tenth_gym_ros map_gym_bridge.py map_name:=test_scenarios num_agent:=2 map_img_ext:=.pgm
+ros2 launch f1tenth_gym_ros map_gym_bridge.py map_name:=playground num_agent:=2 map_img_ext:=.pgm
 
-  ros2 run racecar_experiments static_path_publisher   --ros-args -p csv_path:="$(pwd)/bumper.csv"
+ros2 run racecar_experiments static_path_publisher   --ros-args -p csv_path:="$(pwd)/raceline_playground.csv" -p opponent_csv_path:="$(pwd)/bumper_v_2.csv" -p spawn_opponent_enabled:=true
+(가중치 설정 필요)
+ros2 launch f1tenth_planner fgm_with_pp.launch.py
 
-ros2 launch racecar_frenet_cpp frenet_with_pp_profile.launch.py
-
-ros2 run racecar_experiments opponent_pure_pursuit_node   --ros-args   -p csv_path:="$(pwd)/spielberg_opponent_scenarioB.csv"   -p odom_topic:="/opp_racecar/odom"   -p drive_topic:="/opp_drive"   -p max_speed:=5.0
+ros2 run racecar_experiments opponent_pure_pursuit_node   --ros-args   -p csv_path:="$(pwd)/bumper_v_2.csv"   -p odom_topic:="/opp_racecar/odom"   -p drive_topic:="/opp_drive"   -p max_speed:=5.0
+(v=2, 3, 4, 5)
 
 
 

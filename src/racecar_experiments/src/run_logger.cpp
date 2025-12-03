@@ -38,6 +38,9 @@ public:
 
     stuck_timeout_ = declare_parameter<double>("stuck_timeout", 5.0);
     stuck_dist_thresh_ = declare_parameter<double>("stuck_dist_thresh", 0.2);
+    
+    // [추가] 안전 거리 임계값 파라미터
+    safe_dist_threshold_ = declare_parameter<double>("safe_dist_threshold", 0.5);
 
     // MUX 가중치
     w_speed_ = declare_parameter<double>("w_speed", 0.0);
@@ -62,6 +65,13 @@ public:
     cnt_frenet_ = 0;
     cnt_fgm_ = 0;
     cnt_total_ = 0;
+    
+    // 누적 통계 변수 초기화
+    min_d_min_ = 1e9;
+    unsafe_time_ = 0.0;
+    total_time_ = 0.0;
+    sum_track_err_sq_ = 0.0;
+    sum_a_lat_sq_ = 0.0;
     
     stuck_timer_start_ = this->now();
     
@@ -142,6 +152,10 @@ private:
             start_time_ = this->now();
             last_pos_x_ = x;
             last_pos_y_ = y;
+            
+            // [추가] 상태 전환 시 시간 초기화
+            last_odom_time_ = this->now();
+            
             stuck_timer_start_ = this->now();
             stuck_ref_x_ = x;
             stuck_ref_y_ = y;
@@ -152,6 +166,29 @@ private:
     if (current_state_ == RUNNING) {
         check_stuck(x, y);
 
+        // [추가] dt 계산 및 누적 통계 로직
+        rclcpp::Time now = this->now();
+        double dt = 0.0;
+        if (last_odom_time_.nanoseconds() != 0) {
+            dt = (now - last_odom_time_).seconds();
+            if (dt < 0.0 || dt > 1.0) dt = 0.0; // 비정상값 방지
+        }
+        last_odom_time_ = now;
+
+        // 시간 누적
+        total_time_ += dt;
+
+        // 안전 관련
+        if (last_min_d_ < min_d_min_) min_d_min_ = last_min_d_;
+        if (last_min_d_ < safe_dist_threshold_) {
+            unsafe_time_ += dt;
+        }
+
+        // RMS 누적
+        sum_track_err_sq_ += (last_track_err_ * last_track_err_) * dt;
+        sum_a_lat_sq_     += (a_lat * a_lat) * dt;
+
+        // 기존 로직
         if (speed > max_speed_) max_speed_ = speed;
         if (std::abs(a_lat) > max_a_lat_) max_a_lat_ = std::abs(a_lat);
         
@@ -224,7 +261,6 @@ private:
     }
   }
 
-  // [수정됨] CSV 파일 마지막에 요약 정보 추가 (Append Mode)
   void finish_logging(const std::string& reason, bool trigger_shutdown = true)
   {
     if (current_state_ == FINISHED) return;
@@ -251,7 +287,18 @@ private:
     double frenet_ratio = (cnt_total_ > 0) ? (double)cnt_frenet_ / cnt_total_ * 100.0 : 0.0;
     double fgm_ratio    = (cnt_total_ > 0) ? (double)cnt_fgm_ / cnt_total_ * 100.0 : 0.0;
 
-    // [핵심] 4. 파일을 '추가 모드(Append)'로 다시 열어서 요약 정보 쓰기
+    // [추가] 솔버용 지표 계산
+    double safety_violation_ratio = 0.0;
+    double track_error_rms = 0.0;
+    double a_lat_rms = 0.0;
+
+    if (total_time_ > 0.0) {
+        safety_violation_ratio = unsafe_time_ / total_time_;
+        track_error_rms = std::sqrt(sum_track_err_sq_ / total_time_);
+        a_lat_rms       = std::sqrt(sum_a_lat_sq_ / total_time_);
+    }
+
+    // 4. 파일을 '추가 모드(Append)'로 다시 열어서 요약 정보 쓰기
     std::ofstream summary_ofs(filename_, std::ios::app);
     if (summary_ofs.is_open()) {
         summary_ofs << "\n" // 데이터와 구분하기 위한 빈 줄
@@ -265,7 +312,13 @@ private:
                     << "Max Lat Acc (m/s^2)," << max_a_lat_ << "\n"
                     << "Collision," << (is_collision_ ? "YES" : "NO") << "\n"
                     << "FRENET Usage (%)," << frenet_ratio << "\n"
-                    << "FGM Usage (%)," << fgm_ratio << "\n";
+                    << "FGM Usage (%)," << fgm_ratio << "\n"
+                    // [추가] 추가 지표 기록
+                    << "Min Dist (m)," << min_d_min_ << "\n"
+                    << "Unsafe Time (s)," << unsafe_time_ << "\n"
+                    << "Unsafe Ratio," << safety_violation_ratio << "\n"
+                    << "Track Error RMS (m)," << track_error_rms << "\n"
+                    << "Lat Acc RMS (m/s^2)," << a_lat_rms << "\n";
         
         summary_ofs.close();
         std::cout << "[RunLogger] Summary appended to CSV file.\n";
@@ -302,6 +355,16 @@ private:
     double frenet_ratio = (cnt_total_ > 0) ? (double)cnt_frenet_ / cnt_total_ * 100.0 : 0.0;
     double fgm_ratio    = (cnt_total_ > 0) ? (double)cnt_fgm_ / cnt_total_ * 100.0 : 0.0;
 
+    // 추가 지표 계산 (콘솔용)
+    double safety_violation_ratio = 0.0;
+    double track_error_rms = 0.0;
+    double a_lat_rms = 0.0;
+    if (total_time_ > 0.0) {
+        safety_violation_ratio = unsafe_time_ / total_time_;
+        track_error_rms = std::sqrt(sum_track_err_sq_ / total_time_);
+        a_lat_rms       = std::sqrt(sum_a_lat_sq_ / total_time_);
+    }
+
     std::cout << "\n========================================\n";
     std::cout << " [RunLogger] Experiment Result Summary \n";
     std::cout << "========================================\n";
@@ -316,6 +379,12 @@ private:
     std::cout << " [Planner Usage Ratio]\n";
     std::cout << " FRENET        : " << frenet_ratio << " %\n";
     std::cout << " FGM           : " << fgm_ratio << " %\n";
+    std::cout << "----------------------------------------\n";
+    std::cout << " [Performance Metrics]\n";
+    std::cout << " Min Dist      : " << min_d_min_ << " m\n";
+    std::cout << " Unsafe Time   : " << unsafe_time_ << " s (Ratio: " << safety_violation_ratio << ")\n";
+    std::cout << " Track Err RMS : " << track_error_rms << " m\n";
+    std::cout << " Lat Acc RMS   : " << a_lat_rms << " m/s^2\n";
     std::cout << "========================================\n";
     std::cout << " Log Saved to  : " << filename_ << "\n";
     std::cout << "========================================\n\n";
@@ -351,6 +420,19 @@ private:
   std::string last_planner_ {"NONE"};
   double last_min_d_ {999.9};
   double last_track_err_ {0.0};
+
+  // [추가] 멤버 변수 선언
+  double safe_dist_threshold_;
+
+  // 누적 통계
+  double min_d_min_;
+  double unsafe_time_;
+  double total_time_;
+  double sum_track_err_sq_;
+  double sum_a_lat_sq_;
+
+  rclcpp::Time last_odom_time_;
+
 };
 
 int main(int argc, char ** argv)
