@@ -3,7 +3,8 @@
 #include <string>
 #include <memory>
 #include <cmath>
-
+#include <cstdio>
+#include <algorithm>
 #include "rclcpp/rclcpp.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "planner_mux_msgs/msg/mux_debug.hpp"
