@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <vector>
 #include <iomanip>
+#include <filesystem> // [추가] 파일 이름 변경을 위해 필요
 
 #include "rclcpp/rclcpp.hpp"
 #include "nav_msgs/msg/odometry.hpp"
@@ -16,6 +17,7 @@
 
 using std::placeholders::_1;
 using planner_mux_msgs::msg::MuxDebug;
+namespace fs = std::filesystem; // [추가] namespace 단축
 
 class RunLogger : public rclcpp::Node
 {
@@ -38,11 +40,15 @@ public:
     stuck_dist_thresh_ = declare_parameter<double>("stuck_dist_thresh", 0.2); // 0.2m
 
     // [New] MUX 가중치 파라미터 (로그 출력용)
-    // 런치 파일에서 값을 넘겨주지 않으면 0.0으로 뜸
     w_speed_ = declare_parameter<double>("w_speed", 0.0);
     w_track_ = declare_parameter<double>("w_track", 0.0);
     w_comfort_ = declare_parameter<double>("w_comfort", 0.0);
     w_safety_ = declare_parameter<double>("w_safety", 0.0);
+
+    // 로그 디렉토리가 없으면 생성
+    if (!fs::exists(output_dir_)) {
+        fs::create_directories(output_dir_);
+    }
 
     create_log_file();
 
@@ -241,9 +247,33 @@ private:
     if (current_state_ == FINISHED) return;
     current_state_ = FINISHED;
     
+    // 파일 쓰기 종료
     if (ofs_.is_open()) ofs_.close();
     
     double duration = (this->now() - start_time_).seconds();
+
+    // [수정됨] 파일 이름 변경 로직 (Duration 추가)
+    try {
+        fs::path old_path(filename_);
+        
+        // duration 문자열 생성 (소수점 2자리)
+        std::stringstream ss;
+        ss << std::fixed << std::setprecision(2) << duration;
+        
+        // 새 파일명: 기존파일명_dur_12.34s.csv
+        std::string new_filename = old_path.stem().string() + "_dur_" + ss.str() + "s" + old_path.extension().string();
+        fs::path new_path = old_path.parent_path() / new_filename;
+
+        fs::rename(old_path, new_path);
+        
+        // 로그 출력을 위해 변수 업데이트
+        filename_ = new_path.string();
+        RCLCPP_INFO(get_logger(), "Log file renamed with duration: %s", filename_.c_str());
+
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(get_logger(), "Failed to rename log file: %s", e.what());
+    }
+
     print_summary(reason, duration);
   }
 
@@ -273,10 +303,9 @@ private:
     std::cout << " w_track       : " << w_track_ << "\n";
     std::cout << " w_comfort     : " << w_comfort_ << "\n";
     std::cout << " w_safety      : " << w_safety_ << "\n";
+    std::cout << "========================================\n";
+    std::cout << " Log Saved to  : " << filename_ << "\n";
     std::cout << "========================================\n\n";
-    
-    RCLCPP_INFO(get_logger(), "Summary Saved to: %s", filename_.c_str());
-    RCLCPP_INFO(get_logger(), "Shutting down system...");
     
     // 전체 시스템 종료
     rclcpp::shutdown();
