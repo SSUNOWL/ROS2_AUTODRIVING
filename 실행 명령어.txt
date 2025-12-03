@@ -48,9 +48,13 @@ ros2 launch f1tenth_planner fgm_with_pp.launch.py \ fgm_gap_threshold:=1.2 \ fgm
 ros2 launch racecar_experiments experiment_logger.launch.py     scenario_name:=bumper     planner_mode:=FGM     output_dir:=$(pwd)/logs     collision_topic:=/experiments/crash_detected
 
 ㄴ 이걸로 파라미터 튜닝 ㄱㄱ
-초반 몇개는 이걸로 값 가져오고
+초반 몇개는 이걸로 값 몇개 추려보고 대충 범위 추리기
 파라미터 로 팔만대장경 만들어서 자동화
 이후 ./fgm_batch_run.sh
+-> 자동화 만들어놨음 
+한번 다 돌아가는지 실행해놨다가 fgm_batch_run.sh들어가서 
+use_rviz 파라미터 false로 하면 백그라운드 자동화가능
+ㄴ 수업시간에 조져놓고 튜닝하고 mux 떙기고 빠르게 튜닝 레츠고
 
 <테스트 시나리오 3> 수동차 나란히 주행 (네모난걸 만들어서 주행)
 ros2 launch f1tenth_gym_ros map_gym_bridge.py num_agent:=2
