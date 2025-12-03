@@ -23,10 +23,9 @@ def generate_launch_description():
         description='Number of agents (1: Ego only, 2: Ego + Opponent)'
     )
     
-    # [수정] 맵 이미지 확장자 인자 추가
     map_img_ext_arg = DeclareLaunchArgument(
         'map_img_ext',
-        default_value='.png',  # 기본값은 .png로 유지하거나 .pgm으로 변경 가능
+        default_value='.png',
         description='Map image file extension (.png or .pgm)'
     )
 
@@ -35,19 +34,18 @@ def generate_launch_description():
     
     map_name_config = LaunchConfiguration('map_name')
     num_agent_config = LaunchConfiguration('num_agent')
-    # [수정] 맵 이미지 확장자 설정
     map_img_ext_config = LaunchConfiguration('map_img_ext') 
 
     # 맵 경로 동적 생성
     map_path_no_ext = PathJoinSubstitution([gym_package_share, 'maps', map_name_config])
     
-    # 맵 YAML 파일 경로 (Map Server용)
+    # 맵 YAML 파일 경로
     map_yaml_file = PathJoinSubstitution([
         gym_package_share, 'maps', 
         PythonExpression(["'", map_name_config, ".yaml'"]) 
     ])
 
-    # Opponent Robot State Publisher 실행 조건
+    # Opponent 존재 여부 조건 (State Publisher용)
     has_opp_condition = IfCondition(
         PythonExpression([num_agent_config, " > 1"])
     )
@@ -55,7 +53,6 @@ def generate_launch_description():
     # 3. 노드 정의
 
     # (1) Gym Bridge
-    # [수정] 'map_img_ext' 파라미터에 LaunchConfiguration 연결
     bridge_node = Node(
         package='f1tenth_gym_ros',
         executable='gym_bridge',
@@ -65,13 +62,13 @@ def generate_launch_description():
             sim_config_path,
             {
                 'map_path': map_path_no_ext,
-                'map_img_ext': map_img_ext_config, # <--- 이 부분이 수정됨
+                'map_img_ext': map_img_ext_config,
                 'num_agent': num_agent_config
             }
         ]
     )
 
-    # (2) Map Server (이 노드는 .yaml 파일 경로를 사용하므로 수정 필요 없음)
+    # (2) Map Server
     map_server_node = Node(
         package='nav2_map_server',
         executable='map_server',
@@ -84,14 +81,23 @@ def generate_launch_description():
         ]
     )
     
-    # ... (생략된 다른 노드들: RViz, Lifecycle Manager, Robot State Publishers)
+    # (3) [수정됨] RViz (조건부 설정 파일 로드)
+    # num_agent가 1보다 크면 'gym_bridge_opp.rviz'를, 아니면 'gym_bridge.rviz'를 로드
+    rviz_config_file_name = PythonExpression([
+        "'gym_bridge_opp.rviz' if int(", num_agent_config, ") > 1 else 'gym_bridge.rviz'"
+    ])
 
-    # (3) RViz
+    rviz_config_path = PathJoinSubstitution([
+        gym_package_share, 'launch', rviz_config_file_name
+    ])
+
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
         name='rviz',
-        arguments=['-d', os.path.join(gym_package_share, 'launch', 'gym_bridge.rviz')]
+        # 동적으로 결정된 config 경로를 사용
+        arguments=['-d', rviz_config_path],
+        output='screen'
     )
 
     # (4) Lifecycle Manager
@@ -116,6 +122,8 @@ def generate_launch_description():
         remappings=[('/robot_description', 'ego_robot_description')]
     )
 
+    # 이미 작성하신 부분 (정상 작동함): Opponent용 State Publisher
+    # 토픽: /opp_robot_description 으로 발행됨
     opp_robot_publisher = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
@@ -128,7 +136,7 @@ def generate_launch_description():
     return LaunchDescription([
         map_name_arg,
         num_agent_arg,
-        map_img_ext_arg, # [수정] 인자 추가
+        map_img_ext_arg,
         rviz_node,
         bridge_node,
         nav_lifecycle_node,

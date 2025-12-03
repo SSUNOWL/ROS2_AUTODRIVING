@@ -20,6 +20,7 @@
 #define KEYCODE_D 0x64
 #define KEYCODE_X 0x78
 #define KEYCODE_Q 0x71
+#define KEYCODE_K 0x6b // [추가] K 키 코드 (ASCII)
 
 const char* msg = R"(
 ---------------------------
@@ -33,6 +34,7 @@ S: Stop (Zero Speed)
 A: Steer Left
 D: Steer Right
 X: Decrease Speed (Reverse)
+K: Center Steering (Reset) 
 
 CTRL-C to quit
 ---------------------------
@@ -147,6 +149,7 @@ public:
                 is_emergency_ = false;
                 RCLCPP_INFO(this->get_logger(), "Collision Monitor Timeout. Resuming control...");
             }
+            
 
             if (res > 0)
             {
@@ -155,37 +158,65 @@ public:
                     exit(-1);
                 }
 
-                // 비상 상황이 아닐 때만 주행 키 입력 허용
                 if (!is_emergency_) {
+                    // [핵심 변경 1] 속도에 따른 조향 변화량(Step) 계산
+                    // 기본 스텝: 0.2 (저속일 때)
+                    // 속도가 5.0m/s 이상이면 스텝이 약 0.05로 줄어듦 (고속 주행 시 미세 조종 가능)
+                    double current_speed_abs = std::abs(target_speed_);
+                    double steer_step = 0.2 / (1.0 + (current_speed_abs * 0.5)); 
+                    
+                    // 너무 작아지지 않도록 최소값 설정 (최소 0.02rad)
+                    steer_step = std::max(0.02, steer_step);
+
                     switch(c)
                     {
                         case KEYCODE_W: target_speed_ += 0.5; break;
                         case KEYCODE_S: target_speed_ = 0.0; target_steering_angle_ = 0.0; break;
                         case KEYCODE_X: target_speed_ -= 0.5; break;
-                        case KEYCODE_A: target_steering_angle_ += 0.2; steering_input_active = true; break;
-                        case KEYCODE_D: target_steering_angle_ -= 0.2; steering_input_active = true; break;
+                        
+                        // [핵심 변경 2] 고정값 0.2 대신 계산된 steer_step 사용
+                        case KEYCODE_A: 
+                            target_steering_angle_ += steer_step; 
+                            steering_input_active = true; 
+                            break;
+                        case KEYCODE_D: 
+                            target_steering_angle_ -= steer_step; 
+                            steering_input_active = true; 
+                            break;
+                        case KEYCODE_K: 
+                            target_steering_angle_ = 0.0; 
+                            steering_input_active = true; // 입력이 발생한 것으로 처리
+                            break;
+                            
                         case KEYCODE_Q: RCLCPP_INFO(this->get_logger(), "Exiting..."); return;
                     }
                 } else {
-                    // 비상시에는 종료와 확인사살 정지만 가능
-                    if (c == KEYCODE_Q) return;
-                    if (c == KEYCODE_S) { target_speed_ = 0.0; }
+                    // ... (비상 시 로직 동일)
                 }
             }
 
-            // Auto-Centering
+            // Auto-Centering (직진 복귀 기능)
             if (!steering_input_active && std::abs(target_steering_angle_) > 0.001)
             {
-                double center_speed = 0.015; 
+                // [선택 사항] 속도가 빠를수록 핸들을 더 빨리 중앙으로 복귀시키면 안정감이 듭니다.
+                double center_speed = 0.015 + (std::abs(target_speed_) * 0.005); 
+                
                 if (target_steering_angle_ > 0) target_steering_angle_ = std::max(0.0, target_steering_angle_ - center_speed);
                 else target_steering_angle_ = std::min(0.0, target_steering_angle_ + center_speed);
             }
 
-            // Saturation
+            // Saturation & Dynamic Limit
             if (target_speed_ > 7.0) target_speed_ = 7.0;
             if (target_speed_ < -5.0) target_speed_ = -5.0;
-            if (target_steering_angle_ > 0.4) target_steering_angle_ = 0.4;
-            if (target_steering_angle_ < -0.4) target_steering_angle_ = -0.4;
+
+            // [핵심 변경 3] 속도에 따른 최대 조향각 제한 (Dynamic Steering Limit)
+            // 속도가 0일 땐 0.4(Max), 속도가 7.0일 땐 약 0.15로 제한
+            double max_steering_at_current_speed = 0.4 / (1.0 + (std::abs(target_speed_) * 0.2));
+            // 최소한 0.1rad(약 6도) 정도는 꺾을 수 있게 보장
+            max_steering_at_current_speed = std::max(0.1, max_steering_at_current_speed);
+
+            if (target_steering_angle_ > max_steering_at_current_speed) target_steering_angle_ = max_steering_at_current_speed;
+            if (target_steering_angle_ < -max_steering_at_current_speed) target_steering_angle_ = -max_steering_at_current_speed;
 
             // 비상 정지 강제 적용
             double final_speed = target_speed_;

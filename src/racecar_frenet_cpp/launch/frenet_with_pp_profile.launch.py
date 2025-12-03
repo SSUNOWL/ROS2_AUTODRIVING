@@ -90,7 +90,7 @@ def launch_setup(context, pkg_share):
     }
 
     pp_node = Node(
-        package='racecar_frenet_cpp',
+        package='f1tenth_planner',
         executable='pure_pursuit_node',
         name='pure_pursuit_node',
         output='screen',
