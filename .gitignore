@@ -25,5 +25,13 @@ COLCON_IGNORE
 .idea/
 .DS_Store
 
+# Windows Zone Identifier (보안 식별자 파일 무시)
+*:Zone.Identifier
+
+# 기타 윈도우 시스템 임시 파일 (함께 추가하면 좋습니다)
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
 # Generated documentation
 docs/_build/
