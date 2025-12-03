@@ -3,6 +3,8 @@
 -> 점수를 매겨서 머신러닝 떄려서 답 찾을거임
 
 목표설정: 애초에 frenet을 레이싱용, fgm을 장애물회피용으로 설정함
+그래서 frenet 은 레이싱 잘하는거
+fgm 은 잘피하는 거 -> fgm할때는 레이싱도 해보고, 180 도 지도 도 주행해봐야함
 -> frenet은 비교적 고속, fgm은 저속이어도 됨
 (실제로 어케될지는 모르겠음)
 
@@ -14,7 +16,7 @@
 모든 점수에서 좋은 성적을 내는 mux 가중치를 찾아보자
 
 https://chatgpt.com/share/692f495f-feb4-800c-af5c-7a5a867caa4b
-이거 초반부분 읽어보면될듯
+이거 초반부분 읽어보면될듯  
 
 현재 상황은 frenet parameter 세팅 끝나서
 frenet_local_planner/launch/frenet_with_pp_profile.launch.py
