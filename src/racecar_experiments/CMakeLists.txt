@@ -67,8 +67,8 @@ ament_target_dependencies(path_timer
 # ---- run_logger (MUX 튜닝용 로그 노드) ----
 add_executable(run_logger src/run_logger.cpp)
 
-add_executable(oppteleop_recorder
-    src/oppteleop_recorder.cpp
+add_executable(opponent_trajectory_recorder
+    src/opponent_trajectory_recorder.cpp
 )
 
 add_executable(opponent_replay_node
@@ -78,7 +78,7 @@ add_executable(opponent_replay_node
 ament_target_dependencies(opponent_replay_node ackermann_msgs rclcpp nav_msgs )
 
 
-ament_target_dependencies(oppteleop_recorder ackermann_msgs rclcpp nav_msgs )
+ament_target_dependencies(opponent_trajectory_recorder rclcpp nav_msgs )
 
 
 add_executable(opponent_pure_pursuit_node
@@ -110,7 +110,7 @@ install(TARGETS
   collision_monitor
   path_timer
   run_logger
-  oppteleop_recorder
+  opponent_trajectory_recorder
   opponent_replay_node
   opponent_pure_pursuit_node
 

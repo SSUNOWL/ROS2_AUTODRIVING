@@ -29,62 +29,32 @@ ros2 launch planner_mux time_trial.launch.py \
 
 ros2 run racecar_experiments path_timer
 
---기각--
-<테스트 시나리오 2> 사거리에서 갑자기 등장하는 상대차 (평시에는 frenet으로 이동하다가 갑자기 상대차가 나올때 fgm)
-좌회전 하다가 or 옆에서 등장 -> 3번이랑 다르게 하려면 좌회전??
-터미널 1 (지도 test_scenarios  )
+
+<테스트 시나리오 2> 마주오는 자동차 회피시나리오 -> 상대차가 휘청거림
 ros2 launch f1tenth_gym_ros map_gym_bridge.py map_name:=test_scenarios num_agent:=2 map_img_ext:=.pgm
 
-터미널 2 (경로발행)
-ros2 launch planner_mux time_trial.launch.py \
-  csv_path:=lefthandling.csv \
-  spawn_opponent_enabled:=true \
-  opponent_x:=-5.0 \
-  opponent_y:=7.0 \
-  opponent_yaw:=-1.95346 pp_path_topic:=/frenet_local_plan 
+ros2 run racecar_experiments static_path_publisher   --ros-args -p csv_path:="$(pwd)/bumper.csv"
 
-ros2 launch planner_mux time_trial.launch.py \
-  csv_path:=lefthandling.csv \
-  spawn_opponent_enabled:=true \
-  opponent_x:=-5.0 \
-  opponent_y:=7.0 \
-  opponent_yaw:=-1.95346  pp_path_topic:=/fgm_path
+ros2 launch racecar_frenet_cpp frenet_with_pp_profile.launch.py
 
-ros2 launch planner_mux time_trial.launch.py \
-  csv_path:=lefthandling.csv \
-  spawn_opponent_enabled:=true \
-  opponent_x:=-5.0 \
-  opponent_y:=7.0 \
-  opponent_yaw:=-1.95346
-
-터미널 3 (상대차 조종)
-cd ~/f1_sim_ws
-source install/setup.bash
-ros2 run racecar_teleop_cpp opp_teleop
+ros2 run racecar_experiments opponent_pure_pursuit_node   --ros-args   -p csv_path:="$(pwd)/spielberg_opponent_scenarioB.csv"   -p odom_topic:="/opp_racecar/odom"   -p drive_topic:="/opp_drive"   -p max_speed:=5.0
 
 
 
-
-<테스트 시나리오 3> 마주오는 자동차 회피시나리오 -> 상대차가 휘청거림
-터미널 1 (지도 공터? 넓은거?)
-
-<테스트 시나리오 4> 수동차 나란히 주행 (네모난걸 만들어서 주행)
+<테스트 시나리오 3> 수동차 나란히 주행 (네모난걸 만들어서 주행)
 ros2 launch f1tenth_gym_ros map_gym_bridge.py num_agent:=2
 
-ros2 launch planner_mux time_trial.launch.py  \
-  csv_path:=raceline_with_yaw.csv \
-  spawn_opponent_enabled:=true \
-  opponent_x:=-76.4599 \
-  opponent_y:=52.0159 \
-  opponent_yaw:=-0.834526  
-  pp_path_topic:=/frenet_local_plan
+ros2 run racecar_experiments static_path_publisher   --ros-args -p csv_path:="$(pwd)/raceline_with_yaw.csv"
 
---기각--
-<테스트 시나리오 5> fgm 바보만들기 - U자
+ros2 launch racecar_frenet_cpp frenet_with_pp_profile.launch.py
 
-<테스트 시나리오 6> frenet 바보만들기 - 좁은 통로
+ros2 run racecar_experiments opponent_pure_pursuit_node   --ros-args   -p csv_path:="$(pwd)/spielberg_opponent_scenarioB.csv"   -p odom_topic:="/opp_racecar/odom"   -p drive_topic:="/opp_drive"   -p max_speed:=5.0
 
-이 시나리오를 통해서 fgm,  frenet, mux를 튜닝한다.
+    sx1: -72.6722
+    sy1: 48.7323
+    stheta1: -0.713558
+    (상대차 시작위치)
+
 
 
 <파라미터에 따라 바꾸기>
