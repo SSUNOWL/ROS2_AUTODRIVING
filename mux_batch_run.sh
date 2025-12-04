@@ -71,7 +71,7 @@ for map_name in "${racing_maps[@]}"; do
     ros2 launch racecar_experiments mux_auto_map.launch.py \
         map_name:=$map_name \
         map_img_ext:=$MAP_EXT \
-        use_rviz:=false &
+        use_rviz:=true &
     echo ">>> Waiting 15s for Map initialization..."
     sleep 15
     
