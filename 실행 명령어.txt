@@ -20,10 +20,10 @@ ros2 launch planner_mux time_trial.launch.py pp_path_topic:=/fgm_path
 <테스트 시나리오 1> 180, 90도 코너링
 의도: 급격한 회전에서 잘가는가?
 터미널 1 (지도 map360)
-ros2 launch f1tenth_gym_ros map_gym_bridge.py map_name:=360map num_agent:=1 map_img_ext:=.pgm
+ros2 launch f1tenth_gym_ros map_gym_bridge.py map_name:=hairpin_combo_map num_agent:=1 map_img_ext:=.pgm
 
 ros2 launch planner_mux time_trial.launch.py \
-  csv_path:=180wind.csv
+  csv_path:=raceline_hairpin_combo.csv
 
 ros2 launch planner_mux time_trial.launch.py \
   csv_path:=180wind.csv pp_path_topic:=/frenet_local_plan 

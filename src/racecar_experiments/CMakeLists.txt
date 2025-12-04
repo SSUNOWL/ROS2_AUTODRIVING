@@ -56,14 +56,6 @@ ament_target_dependencies(collision_monitor
   std_msgs
 )
 
-# ---- path_timer ----
-add_executable(path_timer src/path_timer.cpp)
-ament_target_dependencies(path_timer
-  rclcpp
-  nav_msgs
-  std_msgs
-)
-
 # ---- run_logger (MUX 튜닝용 로그 노드) ----
 add_executable(run_logger src/run_logger.cpp)
 
@@ -119,7 +111,6 @@ ament_target_dependencies(run_logger
 install(TARGETS
   static_path_publisher
   collision_monitor
-  path_timer
   run_logger
   opponent_trajectory_recorder
   opponent_replay_node
