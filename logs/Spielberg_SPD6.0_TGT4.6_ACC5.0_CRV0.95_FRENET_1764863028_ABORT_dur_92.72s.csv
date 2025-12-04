@@ -1,0 +1,18 @@
+t,x,y,yaw,speed,yaw_rate,a_lat,planner,min_d,track_error,collision
+
+--- Experiment Summary ---
+Scenario,Spielberg_SPD6.0_TGT4.6_ACC5.0_CRV0.95
+Mode,FRENET
+Finish Reason,MANUAL_ABORT (Force Quit)
+Duration (s),92.72
+Total Dist (m),0.00
+Max Speed (m/s),0.00
+Max Lat Acc (m/s^2),0.00
+Collision,NO
+FRENET Usage (%),0.00
+FGM Usage (%),0.00
+Min Dist (m),1000000000.00
+Unsafe Time (s),0.00
+Unsafe Ratio,0.00
+Track Error RMS (m),0.00
+Lat Acc RMS (m/s^2),0.00

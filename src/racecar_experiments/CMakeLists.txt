@@ -36,7 +36,6 @@ endif()
 
 add_executable(path_saver src/path_saver.cpp)
 ament_target_dependencies(path_saver rclcpp nav_msgs)
-find_package(planner_mux_msgs REQUIRED)
 
 # ---- static_path_publisher ----
 add_executable(static_path_publisher src/static_path_publisher.cpp)
@@ -82,7 +81,6 @@ ament_target_dependencies(avoid_logger
   rclcpp
   nav_msgs
   std_msgs
-  planner_mux_msgs
   ackermann_msgs  # 정지 명령을 위해 필요
 )
 
@@ -103,7 +101,6 @@ ament_target_dependencies(run_logger
   rclcpp
   nav_msgs
   ackermann_msgs
-  planner_mux_msgs
   std_msgs
 )
 

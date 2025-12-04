@@ -15,10 +15,8 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "std_msgs/msg/bool.hpp"
-#include "planner_mux_msgs/msg/mux_debug.hpp"
 
 using std::placeholders::_1;
-using planner_mux_msgs::msg::MuxDebug;
 namespace fs = std::filesystem;
 
 class RunLogger : public rclcpp::Node
@@ -82,9 +80,6 @@ public:
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
       "/ego_racecar/odom", 50, std::bind(&RunLogger::odom_callback, this, _1));
 
-    debug_sub_ = create_subscription<MuxDebug>(
-      "/mux_debug", 50, std::bind(&RunLogger::debug_callback, this, _1));
-
     path_sub_ = create_subscription<nav_msgs::msg::Path>(
       "/plan", 10, std::bind(&RunLogger::path_callback, this, _1));
 
@@ -129,12 +124,6 @@ private:
     }
   }
 
-  void debug_callback(const MuxDebug::SharedPtr msg)
-  {
-    last_planner_ = msg->current_planner;
-    last_min_d_ = std::min(msg->fre_min_d, msg->fgm_min_d);
-    last_track_err_ = std::min(msg->fre_track, msg->fgm_track);
-  }
 
   void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg)
   {
@@ -436,7 +425,6 @@ private:
   std::ofstream ofs_;
 
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
-  rclcpp::Subscription<MuxDebug>::SharedPtr debug_sub_;
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr collision_sub_;
 
