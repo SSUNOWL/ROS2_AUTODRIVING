@@ -15,11 +15,9 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "std_msgs/msg/bool.hpp"
-#include "planner_mux_msgs/msg/mux_debug.hpp"
 #include "ackermann_msgs/msg/ackermann_drive_stamped.hpp" // [필수] 정지 명령용
 
 using std::placeholders::_1;
-using planner_mux_msgs::msg::MuxDebug;
 namespace fs = std::filesystem;
 
 class AvoidLogger : public rclcpp::Node
@@ -77,9 +75,6 @@ public:
     // --- Subscriber & Publisher ---
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
       "/ego_racecar/odom", 50, std::bind(&AvoidLogger::odom_callback, this, _1));
-
-    debug_sub_ = create_subscription<MuxDebug>(
-      "/mux_debug", 50, std::bind(&AvoidLogger::debug_callback, this, _1));
 
     path_sub_ = create_subscription<nav_msgs::msg::Path>(
       "/plan", 10, std::bind(&AvoidLogger::path_callback, this, _1));
@@ -147,20 +142,6 @@ private:
     }
   }
 
-  void debug_callback(const MuxDebug::SharedPtr msg)
-  {
-    last_planner_ = msg->current_planner;
-
-    // [수집] FGM / Frenet 개별 데이터
-    last_fre_min_d_ = msg->fre_min_d;
-    last_fgm_min_d_ = msg->fgm_min_d;
-    last_fre_track_ = msg->fre_track;
-    last_fgm_track_ = msg->fgm_track;
-
-    // MUX 통합 데이터 (기존 호환용)
-    last_min_d_     = std::min(msg->fre_min_d, msg->fgm_min_d);
-    last_track_err_ = std::min(msg->fre_track, msg->fgm_track);
-  }
 
   void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg)
   {
@@ -383,7 +364,6 @@ private:
 
   rclcpp::Publisher<ackermann_msgs::msg::AckermannDriveStamped>::SharedPtr drive_pub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
-  rclcpp::Subscription<MuxDebug>::SharedPtr debug_sub_;
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr collision_sub_;
 
