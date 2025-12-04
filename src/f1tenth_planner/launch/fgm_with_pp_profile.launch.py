@@ -6,36 +6,22 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def launch_setup(context, *args, **kwargs):
-    # --- 런치 인자 읽기 ---
-    profile = LaunchConfiguration("profile").perform(context).lower()   # safe / balanced / race
-    track = LaunchConfiguration("track").perform(context).lower()       # spielberg / 360
-    user_csv = LaunchConfiguration("pp_csv_path").perform(context)      # "__auto__" 또는 사용자 지정 경로
+    profile = LaunchConfiguration("profile").perform(context).lower()
+    track = LaunchConfiguration("track").perform(context).lower()
+    user_csv = LaunchConfiguration("pp_csv_path").perform(context)
 
-    # 방어 코드
-    if profile not in ["safe", "balanced", "race"]:
-        profile = "balanced"
+    # profile 검사
+    if profile not in ["optimal"]:
+        print("[FGM Profile] WARNING: Only 'optimal' is supported. Defaulting to optimal.")
+        profile = "optimal"
 
     if track not in ["spielberg", "360"]:
         track = "spielberg"
 
-    # --- 공통 FGM / PP 파라미터 (두 맵 공통 베이스) ---
+    # ----------------------------------------------------------
+    # 최소 공통 파라미터 (PP 관련 + CSV 선택만 남김)
+    # ----------------------------------------------------------
     common_params = {
-        # FGM 공통 설정
-        "fgm_gap_threshold": 1.15,
-        "fgm_bubble_radius": 0.46,
-        "fgm_fov_angle": 180.0,
-        "fgm_min_planning_dist": 2.0,
-        "fgm_max_planning_dist": 4.5,
-        "fgm_planning_gain": 1.0,
-
-        "fgm_min_lookahead": 1.8,
-        "fgm_max_lookahead": 3.8,   # balanced에서 3.9로 덮어씀
-        "fgm_lookahead_gain": 0.55, # balanced에서 0.56으로 덮어씀
-
-        "fgm_min_speed": 2.0,
-        "fgm_slow_down_dist": 3.0,
-
-        # Pure Pursuit 공통 설정
         "pp_lookahead_min": 1.2,
         "pp_lookahead_gain": 0.36,
         "pp_wheelbase": 0.33,
@@ -43,33 +29,9 @@ def launch_setup(context, *args, **kwargs):
         "pp_frenet_path_topic": "/fgm_path",
     }
 
-    # --- 프로파일별 룩어헤드 보정 (balanced만 살짝 공격적으로) ---
-    if profile == "balanced":
-        common_params["fgm_max_lookahead"] = 3.9
-        common_params["fgm_lookahead_gain"] = 0.56
-
-    # --- 맵/프로파일별 속도 테이블 ---
-    speed_table = {
-        "spielberg": {
-            "safe": 4.8,
-            "balanced": 5.2,
-            "race": 5.3,
-        },
-        "360": {
-            "safe": 4.1,    # Run3 기반
-            "balanced": 4.35,  # Run10 기반
-            "race": 4.6,    # Run5 기반
-        },
-    }
-
-    max_speed = speed_table[track][profile]
-
-    # 속도 계열 파라미터 (FGM + PP 공통)
-    common_params["fgm_max_speed"] = max_speed
-    common_params["pp_max_speed"] = max_speed
-
-    # --- CSV 경로 선택 로직 ---
-    # "__auto__"면 트랙에 따라 기본값 사용, 아니면 사용자가 준 값 그대로 사용
+    # ----------------------------------------------------------
+    # CSV 경로 선택
+    # ----------------------------------------------------------
     if track == "360":
         default_csv = "180wind.csv"
     else:
@@ -82,32 +44,58 @@ def launch_setup(context, *args, **kwargs):
 
     common_params["pp_csv_path"] = csv_to_use
 
-    # --- 실제 fgm_with_pp.launch.py 인클루드 ---
+    # ----------------------------------------------------------
+    # ★ optimal: 모든 FGM 파라미터를 여기서 100% 명시
+    # ----------------------------------------------------------
+    if profile == "optimal":
+        optimal = {
+            "fgm_fov_angle": 190.5232,
+            "fgm_speed_check_fov_deg": 21.8559,
+
+            "fgm_gap_threshold": 0.9946,
+            "fgm_bubble_radius": 0.3625,
+            "fgm_required_clearance": 0.4313,
+
+            "fgm_width_weight": 0.7846,
+            "fgm_angle_weight": 8.4080,
+            "fgm_steer_weight": 0.0472,
+            "fgm_hysteresis_bonus": 1.3784,
+            "fgm_change_threshold": 0.2005,
+            "fgm_smoothing_alpha": 0.5416,
+            "fgm_dynamic_bubble_speed_coeff": 0.1703,
+
+            "fgm_max_speed": 5.6373,
+            "pp_max_speed": 5.6373,
+        }
+        common_params.update(optimal)
+
+    # ----------------------------------------------------------
+    # fgm_with_pp.launch.py include
+    # ----------------------------------------------------------
     planner_pkg = FindPackageShare("f1tenth_planner")
     base_launch_path = PathJoinSubstitution(
         [planner_pkg, "launch", "fgm_with_pp.launch.py"]
     )
 
-    # launch_arguments에 넣기 위해 문자열로 캐스팅
     launch_args = {
         k: (str(v).lower() if isinstance(v, bool) else str(v))
         for k, v in common_params.items()
     }
 
-    include_fgm_with_pp = IncludeLaunchDescription(
+    include_node = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(base_launch_path),
         launch_arguments=launch_args.items(),
     )
 
-    return [include_fgm_with_pp]
+    return [include_node]
 
 
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             "profile",
-            default_value="balanced",
-            description="FGM profile: safe | balanced | race",
+            default_value="optimal",
+            description="Only 'optimal' supported for FGM tuning.",
         ),
         DeclareLaunchArgument(
             "track",
@@ -117,7 +105,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "pp_csv_path",
             default_value="__auto__",
-            description="Path to global CSV. If '__auto__', use raceline_with_yaw.csv (spielberg) or 180wind.csv (360).",
+            description="CSV path for PP global reference.",
         ),
         OpaqueFunction(function=launch_setup),
     ])

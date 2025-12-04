@@ -167,6 +167,8 @@ public:
     // ROS 파라미터
     max_speed_ = this->declare_parameter<double>("max_speed", 5.0);
     target_speed_ = this->declare_parameter<double>("target_speed", 5.0);
+    max_accel_ = this->declare_parameter<double>("max_accel", 4.0);
+    max_curvature_ = this->declare_parameter<double>("max_curvature", 0.8);
     // Subscriber
     odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
       "/ego_racecar/odom", 10,
@@ -766,10 +768,10 @@ private:
 
   // 파라미터
   double max_speed_;              // [m/s] ROS 파라미터
+  double max_accel_;
+  double  max_curvature_ ;
 
   // Frenet 파라미터 (기본값)
-  double max_accel_        = 4.0;   // [m/ss]
-  double max_curvature_    = 0.8;   // [1/m]
   double max_road_width_   = 2.0;   // [m]  ← 회피 위해 늘림
   double d_road_width_res_ = 0.25;  // [m]  ← 더 촘촘하게
   double target_speed_;  // [m/s]
