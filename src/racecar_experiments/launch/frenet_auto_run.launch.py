@@ -125,14 +125,14 @@ def generate_launch_description():
     # --- Execution Sequence ---
     
     # T=1.0: 경로 발행
-    seq_1_path = TimerAction(period=1.0, actions=[static_path_node])
+    seq_1_path = TimerAction(period=3.0, actions=[static_path_node])
     
     # T=3.0: 모니터링 시스템 시작 (Logger + Collision Monitor)
     # [수정됨] 충돌 모니터도 이때 같이 켜서 감시를 시작합니다.
-    seq_2_monitor = TimerAction(period=3.0, actions=[logger_node, collision_node])
+    seq_2_monitor = TimerAction(period=7.0, actions=[logger_node, collision_node])
     
     # T=5.0: 주행 시작 (Planner)
-    seq_3_planner = TimerAction(period=5.0, actions=[planner_launch])
+    seq_3_planner = TimerAction(period=9.0, actions=[planner_launch])
 
     return LaunchDescription([
         map_name_arg, max_speed_arg, target_speed_arg, max_accel_arg, max_curvature_arg,

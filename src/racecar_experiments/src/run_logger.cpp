@@ -39,7 +39,7 @@ public:
     stuck_timeout_ = declare_parameter<double>("stuck_timeout", 5.0);
     stuck_dist_thresh_ = declare_parameter<double>("stuck_dist_thresh", 0.2);
     
-    // [추가] 안전 거리 임계값 파라미터
+    // 안전 거리 임계값 파라미터
     safe_dist_threshold_ = declare_parameter<double>("safe_dist_threshold", 0.5);
 
     // MUX 가중치
@@ -56,6 +56,10 @@ public:
 
     current_state_ = WAITING_FOR_PATH;
     start_time_ = this->now(); 
+    
+    // [수정] 강제 종료 시 시간 계산을 위한 변수 초기화
+    last_alive_time_ = start_time_;
+
     has_left_start_ = false;
 
     max_speed_ = 0.0;
@@ -134,6 +138,9 @@ private:
 
   void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg)
   {
+    // [수정] 오돔 콜백이 호출될 때마다 '살아있는 시간' 갱신
+    last_alive_time_ = this->now();
+
     double x = msg->pose.pose.position.x;
     double y = msg->pose.pose.position.y;
     double vx = msg->twist.twist.linear.x;
@@ -153,7 +160,7 @@ private:
             last_pos_x_ = x;
             last_pos_y_ = y;
             
-            // [추가] 상태 전환 시 시간 초기화
+            // 상태 전환 시 시간 초기화
             last_odom_time_ = this->now();
             
             stuck_timer_start_ = this->now();
@@ -166,7 +173,7 @@ private:
     if (current_state_ == RUNNING) {
         check_stuck(x, y);
 
-        // [추가] dt 계산 및 누적 통계 로직
+        // dt 계산 및 누적 통계 로직
         rclcpp::Time now = this->now();
         double dt = 0.0;
         if (last_odom_time_.nanoseconds() != 0) {
@@ -271,23 +278,34 @@ private:
         ofs_.close();
     }
     
-    // 2. Duration 계산
+    // 2. Duration 계산 [수정됨]
+    // abort 시 rclcpp가 종료되어 this->now()를 호출 못하는 문제를 해결
     double duration = 0.0;
     try {
+        rclcpp::Time end_time;
         if (rclcpp::ok()) {
-            duration = (this->now() - start_time_).seconds();
+            end_time = this->now();
         } else {
-             duration = 0.0; 
+            // 이미 종료된 상태(Destructor 등)라면 마지막으로 업데이트된 시간을 사용
+            end_time = last_alive_time_;
+        }
+        
+        // 시간 차이 계산
+        if (end_time.nanoseconds() > 0) {
+             duration = (end_time - start_time_).seconds();
         }
     } catch (...) {
-        duration = 0.0;
+        // 혹시라도 계산 실패 시 누적 시간 사용
+        duration = total_time_;
     }
+
+    if (duration < 0.0) duration = 0.0;
     
     // 3. 통계 계산
     double frenet_ratio = (cnt_total_ > 0) ? (double)cnt_frenet_ / cnt_total_ * 100.0 : 0.0;
     double fgm_ratio    = (cnt_total_ > 0) ? (double)cnt_fgm_ / cnt_total_ * 100.0 : 0.0;
 
-    // [추가] 솔버용 지표 계산
+    // 솔버용 지표 계산
     double safety_violation_ratio = 0.0;
     double track_error_rms = 0.0;
     double a_lat_rms = 0.0;
@@ -313,7 +331,7 @@ private:
                     << "Collision," << (is_collision_ ? "YES" : "NO") << "\n"
                     << "FRENET Usage (%)," << frenet_ratio << "\n"
                     << "FGM Usage (%)," << fgm_ratio << "\n"
-                    // [추가] 추가 지표 기록
+                    // 추가 지표 기록
                     << "Min Dist (m)," << min_d_min_ << "\n"
                     << "Unsafe Time (s)," << unsafe_time_ << "\n"
                     << "Unsafe Ratio," << safety_violation_ratio << "\n"
@@ -425,6 +443,9 @@ private:
   State current_state_;
   rclcpp::Time start_time_;
   
+  // [추가] 마지막으로 살아있던 시간을 기록하는 변수
+  rclcpp::Time last_alive_time_;
+
   double start_x_, start_y_, goal_x_, goal_y_;
   bool has_left_start_ = false; 
   bool is_collision_ = false;
@@ -437,7 +458,7 @@ private:
   double last_min_d_ {999.9};
   double last_track_err_ {0.0};
 
-  // [추가] 멤버 변수 선언
+  // 멤버 변수 선언
   double safe_dist_threshold_;
 
   // 누적 통계
