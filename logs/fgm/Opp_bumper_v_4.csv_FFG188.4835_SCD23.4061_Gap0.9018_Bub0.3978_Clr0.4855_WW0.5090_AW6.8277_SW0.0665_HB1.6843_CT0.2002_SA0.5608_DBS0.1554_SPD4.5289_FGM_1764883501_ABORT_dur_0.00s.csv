@@ -1,0 +1,13 @@
+t,x,y,yaw,speed,yaw_rate,a_lat,planner,min_d,track_error,fre_min_d,fgm_min_d,fre_track,fgm_track,collision
+
+--- Experiment Summary ---
+Scenario,Opp_bumper_v_4.csv_FFG188.4835_SCD23.4061_Gap0.9018_Bub0.3978_Clr0.4855_WW0.5090_AW6.8277_SW0.0665_HB1.6843_CT0.2002_SA0.5608_DBS0.1554_SPD4.5289
+Finish Reason,MANUAL_ABORT
+Duration (s),0.00
+Total Dist (m),0.00
+Collision,NO
+Min Dist (m),1000000000.00
+Unsafe Ratio,0.00
+FGM Min Dist (m),1000000000.00
+FGM Unsafe Ratio,0.00
+FGM Track RMS (m),0.00
