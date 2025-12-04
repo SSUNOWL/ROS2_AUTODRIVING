@@ -57,6 +57,8 @@ def generate_launch_description():
     # 시나리오 이름 생성
     scenario_name_str = PythonExpression([
         "'Opp_' + '", LaunchConfiguration('opponent_csv_filename'), "' + ",
+        "'_FFG' + '", LaunchConfiguration('fgm_fov_angle'), "' +",
+        "'_SCD' + '", LaunchConfiguration('fgm_speed_check_fov_deg'), "' +",
         "'_Gap' + '", LaunchConfiguration('fgm_gap_threshold'), "' + ",
         "'_Bub' + '", LaunchConfiguration('fgm_bubble_radius'), "' + ",
         "'_Clr' + '", LaunchConfiguration('fgm_required_clearance'), "' + ",
