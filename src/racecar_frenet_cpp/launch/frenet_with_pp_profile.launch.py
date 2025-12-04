@@ -12,8 +12,8 @@ def generate_launch_description():
 
     profile_arg = DeclareLaunchArgument(
         'profile',
-        default_value='BALANCED',
-        description='Frenet profile: BALANCED | RACE | EXTREME'
+        default_value='OPTIMAL',
+        description='Frenet profile: OPTIMAL'
     )
 
     return LaunchDescription([
@@ -31,50 +31,17 @@ def launch_setup(context, pkg_share):
     # - RACE     : raceline + hairpin 공통 RACE 프로필 (X1He)
     # - EXTREME  : raceline 전용 최속(X1), hairpin에서는 과격
 
-    if profile == 'BALANCED':
+    if profile == 'OPTIMAL':
         # hairpin에서 처음으로 안정 완주했던 계열(X1Hc 근처)을 베이스로,
         # 너무 느리지 않게만 살짝 조정한 "세이프 모드"
         frenet_params = {
-            'max_speed': 5.0,
-            'target_speed': 4.0,
-            'max_accel': 4.0,
-            'max_curvature': 0.9,
+            'max_speed': 5.5,      # spd
+            'target_speed': 5.0,   # tgt
+            'max_accel': 6.0,      # acc
+            'max_curvature': 1.0,  # crv
         }
-        pp_max_speed = 5.0
+        pp_max_speed = 5.5
 
-    elif profile == 'RACE':
-        # ✅ 공통 RACE 프로필 (X1He)
-        # hairpin: 61.06 s / Max v ≈ 4.7 / a_lat ≈ 12.8 / NO collision
-        # raceline: 83.35 s / Max v ≈ 4.6 / a_lat ≈ 8.6 / NO collision
-        frenet_params = {
-            'max_speed': 5.4,
-            'target_speed': 4.7,
-            'max_accel': 5.0,
-            'max_curvature': 0.9,
-        }
-        pp_max_speed = 5.4
-
-    elif profile == 'EXTREME':
-        # ⚠ raceline 최속(X1) 프로필
-        # raceline: 76.69 s / Max v ≈ 5.0 / a_lat ≈ 9.27 (GOAL)
-        # hairpin에서는 과격하므로 사용 비권장
-        frenet_params = {
-            'max_speed': 6.2,
-            'target_speed': 5.1,
-            'max_accel': 5.0,
-            'max_curvature': 1.0,
-        }
-        pp_max_speed = 6.2
-
-    else:
-        # 잘못된 값 들어오면 공통 RACE로 fallback
-        frenet_params = {
-            'max_speed': 5.4,
-            'target_speed': 4.7,
-            'max_accel': 5.0,
-            'max_curvature': 0.9,
-        }
-        pp_max_speed = 5.4
 
     # --- 2) Frenet Local Planner 노드 ---
 
