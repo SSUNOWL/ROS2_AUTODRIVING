@@ -80,6 +80,11 @@ def generate_launch_description():
              "{header: {stamp: now, frame_id: ego_base_link}, drive: {steering_angle: 0.0, speed: 0.0}}"],
         output='screen'
     )
+    stop_opp_cmd = ExecuteProcess(
+        cmd=['ros2', 'topic', 'pub', '-1', '/opp_drive', 'ackermann_msgs/msg/AckermannDriveStamped',
+             "{header: {stamp: now, frame_id: opp_base_link}, drive: {steering_angle: 0.0, speed: 0.0}}"],
+        output='screen'
+    )
 
     # 4-2. Static Path Publisher
     static_path_node = Node(
@@ -195,7 +200,7 @@ def generate_launch_description():
         fgm_angle_weight_arg, fgm_steer_weight_arg, fgm_hysteresis_bonus_arg,
         fgm_change_threshold_arg, fgm_smoothing_alpha_arg, fgm_dynamic_bubble_speed_coeff_arg,
         
-        stop_cmd,
+        stop_cmd,stop_opp_cmd,
         seq_1, seq_2, seq_3, seq_4,
         exit_on_logger_finish,
         timeout_action
