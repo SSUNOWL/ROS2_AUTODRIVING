@@ -85,6 +85,17 @@ add_executable(opponent_pure_pursuit_node
     src/opponent_pure_pursuit_node.cpp
 )
 
+add_executable(avoid_logger src/avoid_logger.cpp)
+ament_target_dependencies(avoid_logger
+  rclcpp
+  nav_msgs
+  std_msgs
+  planner_mux_msgs
+  ackermann_msgs  # 정지 명령을 위해 필요
+)
+
+# install 섹션에도 추
+
 ament_target_dependencies(opponent_pure_pursuit_node   
   rclcpp
   nav_msgs
@@ -113,6 +124,7 @@ install(TARGETS
   opponent_trajectory_recorder
   opponent_replay_node
   opponent_pure_pursuit_node
+  avoid_logger
 
   DESTINATION lib/${PROJECT_NAME})
 

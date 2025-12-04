@@ -125,14 +125,15 @@ def generate_launch_description():
     # 4-5. Logger
     logger_node = Node(
         package='racecar_experiments',
-        executable='run_logger', 
-        name='run_logger_node',
+        executable='avoid_logger',  # 변경됨
+        name='avoid_logger_node',
         output='screen',
         parameters=[{
             'planner_mode': 'FGM',
             'output_dir': os.path.join(os.getcwd(), 'logs'),
             'collision_topic': '/experiments/crash_detected',
-            'scenario_name': scenario_name_str
+            'scenario_name': scenario_name_str,
+            # 'goal_tolerance'는 이제 덜 중요하지만 기본값 2.0m 사용됨
         }]
     )
 
