@@ -30,7 +30,7 @@ struct Point2D {
 class LocalPlannerMux : public rclcpp::Node {
 public:
   LocalPlannerMux() : Node("local_planner_mux") {
-    d_min_      = this->declare_parameter("d_min", 0.30);
+    d_min_      = this->declare_parameter("d_min", 0.15);
     v_ref_      = this->declare_parameter("v_ref", 5.0);
     jerk_ref_   = this->declare_parameter("jerk_ref", 5.0);
     track_ref_  = this->declare_parameter("track_ref", 0.5);
@@ -39,7 +39,7 @@ public:
     w_track_    = this->declare_parameter("w_track",   1.0);
     w_comfort_  = this->declare_parameter("w_comfort", 1.0);
 
-    vehicle_radius_ = this->declare_parameter("vehicle_radius", 0.25);
+    vehicle_radius_ = this->declare_parameter("vehicle_radius", 0.15);
     clearance_ref_  = this->declare_parameter("clearance_ref", 0.5);
     risk_ref_       = this->declare_parameter("risk_ref", 1.0);
     w_clearance_    = this->declare_parameter("w_clearance", 1.0);
@@ -50,10 +50,10 @@ public:
     w_dynamics_     = this->declare_parameter("w_dynamics", 1.0);
 
     max_speed_mux_   = this->declare_parameter("max_speed_mux", 6.0);
-    max_dv_step_mux_ = this->declare_parameter("max_dv_step_mux", 1.0);
+    max_dv_step_mux_ = this->declare_parameter("max_dv_step_mux", 0.25);
 
     // 히스테리시스 파라미터
-    switch_min_interval_ = this->declare_parameter("switch_min_interval", 0.8); // 최소 0.8초 유지
+    switch_min_interval_ = this->declare_parameter("switch_min_interval", 0.3); // 최소 0.3초 유지
     switch_score_margin_ = this->declare_parameter("switch_score_margin", 0.15); // 점수 0.15 이상 좋아야 갈아탐
 
     last_switch_time_ = this->now();
