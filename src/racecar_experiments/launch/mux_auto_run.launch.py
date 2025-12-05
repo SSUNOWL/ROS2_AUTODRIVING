@@ -185,8 +185,8 @@ def generate_launch_description():
     # 입력: /frenet_local_plan, /fgm_path
     # 출력: /selected_path
     mux_node = Node(
-        package='racecar_experiments',
-        executable='local_planner_mux', # CMakeLists.txt의 실행 파일명 확인 필요
+        package='planner_mux',
+        executable='planner_mux_node', # CMakeLists.txt의 실행 파일명 확인 필요
         name='local_planner_mux',
         output='screen',
         parameters=[{
@@ -205,7 +205,7 @@ def generate_launch_description():
     # 입력: /selected_path (Mux가 선택한 경로)
     # 출력: /drive (실제 차량 제어)
     main_pp_node = Node(
-        package='racecar_experiments',
+        package='f1tenth_planner',
         executable='pure_pursuit_node', # 혹은 pp_node 등 실제 이름
         name='mux_pure_pursuit',
         output='screen',
@@ -213,7 +213,7 @@ def generate_launch_description():
             'path_topic': '/selected_path',   # [핵심] Mux의 출력 경로를 구독
             'drive_topic': '/drive',          # 실제 구동 토픽
             'lookahead_dist': 1.0,            # 튜닝 필요
-            'max_speed': 6.0,                 # Mux에서 속도 프로파일을 생성하므로 충분히 크게
+            'max_speed': 5.5,                 # Mux에서 속도 프로파일을 생성하므로 충분히 크게
             'visualize_lookahead': True
         }],
         # 만약 frenet/fgm 런치파일이 /drive를 강제로 잡고 있다면
