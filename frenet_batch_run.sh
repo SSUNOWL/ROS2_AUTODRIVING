@@ -6,7 +6,7 @@ source install/setup.bash
 maps=("Spielberg")
 
 # RViz 실행 여부 (장시간 학습 시 false 권장)
-USE_RVIZ="false"
+USE_RVIZ="true"
 
 # 파라미터 리스트 (5 Params: Frenet[Max, Tgt, Acc, Crv] | PP[Max])
 params_list=(
