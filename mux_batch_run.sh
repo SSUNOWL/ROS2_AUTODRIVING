@@ -10,10 +10,6 @@ source install/setup.bash
 # 예: "Speed중시", "안전중시", "추종중시", "밸런스"
 mux_params=(
     "1.0 1.0 1.0 1.0 1.0"   # Baseline (Balance)
-    "2.0 0.5 0.5 0.5 0.5"   # Speed Heavy
-    "0.5 2.0 0.5 0.5 0.5"   # Tracking Heavy
-    "0.5 0.5 1.0 2.0 1.0"   # Safety (Clearance) Heavy
-    "0.5 0.5 2.0 0.5 1.0"   # Comfort Heavy
 )
 
 # 2. Racing Scenario Maps (Solo)
@@ -38,13 +34,34 @@ cleanup_ros_nodes() {
     pkill -f "nav2"
     pkill -f "mux_controller"
     pkill -f "mux_auto_run.launch.py"
+    pkill -f "map_server"
+    pkill -f "nav2_map_server"
+    pkill -f "lifecycle_manager"
+    pkill -f "nav2_lifecycle_manager"
     
     # 이제 이 파일 하나만 끄면 됨
     pkill -f "mux_auto_map.launch.py"
     
     pkill -f "racecar_frenet_cpp"
     pkill -f "f1tenth_planner"
-    sleep 2
+    
+
+    5. 확실히 죽었는지 확인하는 대기 로직 (중요)
+    # map_server가 완전히 사라질 때까지 최대 10초 대기
+    echo "   >>> Waiting for map_server to terminate..."
+    COUNT=0
+    while pgrep -f "map_server" > /dev/null; do
+        sleep 1
+        COUNT=$((COUNT+1))
+        if [ $COUNT -ge 10 ]; then
+            echo "   !!! Force killing map_server !!!"
+            pkill -9 -f "map_server"
+            break
+        fi
+    done
+
+    echo "   >>> Cleanup Complete."
+    sleep 3
 }
 
 # ==========================================

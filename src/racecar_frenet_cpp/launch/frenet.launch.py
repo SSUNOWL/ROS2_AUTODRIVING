@@ -12,10 +12,10 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 # 요청하신 파라미터 값 적용
-                'max_speed': 5.5,      # spd
-                'target_speed': 5.0,   # tgt
-                'max_accel': 6.0,      # acc
-                'max_curvature': 1.0   # crv
+                'max_speed': 6.5,      # spd
+                'target_speed': 5.2,   # tgt
+                'max_accel': 6.0,     # acc
+                'max_curvature': 0.9   # crv
             }]
         )
     ])

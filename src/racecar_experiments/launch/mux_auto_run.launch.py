@@ -46,14 +46,15 @@ def generate_launch_description():
     
     # 시나리오 이름 생성 (로그 파일용)
     scenario_name_str = PythonExpression([
-        "'Mux_' + '", LaunchConfiguration('map_name'), "' + ",
-        "'_WS' + '", LaunchConfiguration('w_speed'), "' + ",
-        "'_WT' + '", LaunchConfiguration('w_track'), "' + ",
-        "'_WC' + '", LaunchConfiguration('w_comfort'), "' + ",
-        "'_WCL' + '", LaunchConfiguration('w_clearance'), "' + ",
-        "'_WD' + '", LaunchConfiguration('w_dynamics'), "' + ",
-        "('_Opp_' + '", LaunchConfiguration('opponent_csv_filename'), "')" if is_playground else "''"
+        "'Mux_' + str(", LaunchConfiguration('map_name'), ") + "
+        "'_WS' + str(", LaunchConfiguration('w_speed'), ") + "
+        "'_WT' + str(", LaunchConfiguration('w_track'), ") + "
+        "'_WC' + str(", LaunchConfiguration('w_comfort'), ") + "
+        "'_WCL' + str(", LaunchConfiguration('w_clearance'), ") + "
+        "'_WD' + str(", LaunchConfiguration('w_dynamics'), ") + "
+        "'_Opp_' + str(", LaunchConfiguration('opponent_csv_filename'), ")"
     ])
+
 
     # 경로 파일 설정
     csv_filename = PythonExpression(["'raceline_' + '", LaunchConfiguration('map_name'), "' + '.csv'"])
@@ -151,15 +152,8 @@ def generate_launch_description():
     # Frenet은 '/frenet_local_plan' (Path)만 잘 발행하면 됨
     frenet_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            PathJoinSubstitution([frenet_pkg, 'launch', 'frenet_with_pp.launch.py'])
+            PathJoinSubstitution([frenet_pkg, 'launch', 'frenet.launch.py'])
         ),
-        launch_arguments={
-            'max_speed': '5.5',
-            'target_speed': '4.8',
-            'max_accel': '5.0',
-            'max_curvature': '1.0',
-            'pp_use_frenet_path': 'true',
-        }.items()
         # [핵심] 여기서 /drive를 Remap하여 실제 주행 간섭 방지
         # launch 파일 내부 구조에 따라 remap 방식이 다를 수 있으나, 
         # 일반적으로 Node 레벨 Remap이 우선 적용됨을 가정
@@ -169,12 +163,8 @@ def generate_launch_description():
     # [중요] FGM 내부의 구동 명령 무시. '/fgm_path' (Path)만 필요함.
     fgm_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            PathJoinSubstitution([planner_pkg, 'launch', 'fgm_with_pp.launch.py'])
-        ),
-        launch_arguments={
-            'fgm_gap_threshold': '1.2',
-            'pp_max_speed': '5.0',
-        }.items()
+            PathJoinSubstitution([planner_pkg, 'launch', 'fgm.launch.py'])
+        )
     )
 
     # ==============================
