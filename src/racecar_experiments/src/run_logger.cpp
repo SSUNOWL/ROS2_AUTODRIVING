@@ -31,7 +31,7 @@ public:
     scenario_name_ = declare_parameter<std::string>("scenario_name", "scenario");
     planner_mode_  = declare_parameter<std::string>("planner_mode", "MUX");
     
-    goal_tolerance_ = declare_parameter<double>("goal_tolerance", 0.5); 
+    goal_tolerance_ = declare_parameter<double>("goal_tolerance", 1.3); 
     start_safe_dist_ = declare_parameter<double>("start_safe_dist", 2.0);
 
     stuck_timeout_ = declare_parameter<double>("stuck_timeout", 5.0);
@@ -109,6 +109,9 @@ private:
     start_y_ = msg->poses.front().pose.position.y;
     goal_x_ = msg->poses.back().pose.position.x;
     goal_y_ = msg->poses.back().pose.position.y;
+    double qz = msg->poses.back().pose.orientation.z;
+    double qw = msg->poses.back().pose.orientation.w;
+    goal_yaw_ = std::atan2(2.0 * qw * qz, 1.0 - 2.0 * qz * qz);
 
     has_left_start_ = false;
     current_state_ = READY;
@@ -215,12 +218,35 @@ private:
                 has_left_start_ = true;
             }
         }
-        if (has_left_start_) {
+        /*if (has_left_start_) { // 기존 방식 : 도착 점 기준 원 범위. goal_tolerance는 도착 점과의 거리
             if (std::hypot(x - goal_x_, y - goal_y_) < goal_tolerance_) {
                 finish_logging("GOAL REACHED");
             }
+        }*/
+
+        // 새로운 방식 : 도착 점 기준 트랙 폭 범위
+        double dx = x - goal_x_;
+        double dy = y - goal_y_;
+
+    // 회전 변환을 통해 도착 지점 기준 로컬 좌표계로 변환
+    // long_dist: 도착선을 기준으로 앞/뒤 거리 (+면 도착선 통과, -면 도착선 전)
+        double long_dist = dx * std::cos(goal_yaw_) + dy * std::sin(goal_yaw_);
+    
+    // lat_dist: 도착선 중심으로부터 좌/우 거리 (도로 폭 판단용)
+        double lat_dist = -dx * std::sin(goal_yaw_) + dy * std::cos(goal_yaw_);
+
+    // 판단 조건:
+    // 1. long_dist >= 0.0 : 도착선(평면)을 넘어섬
+    // 2. long_dist < 2.0 : 도착선을 넘었지만 너무 멀리 가지 않음 (오탐지 방지용 버퍼)
+    // 3. std::abs(lat_dist) < goal_tolerance_ : 도로 폭(tolerance) 이내에 있음
+    
+    // 주의: 여기서 goal_tolerance_는 더 이상 '반경'이 아니라 '도로 폭의 절반' 역할.
+    // 따라서 launch 파일에서 goal_tolerance를 도로 폭 절반 정도로 설정해야함.
+    
+        if ((long_dist >= 0.0 && long_dist < 5.0 && std::abs(lat_dist) < goal_tolerance_) && has_left_start_) {
+          finish_logging("GOAL REACHED");
         }
-    }
+      }
   }
 
   void check_stuck(double curr_x, double curr_y)
@@ -434,7 +460,7 @@ private:
   // [추가] 마지막으로 살아있던 시간을 기록하는 변수
   rclcpp::Time last_alive_time_;
 
-  double start_x_, start_y_, goal_x_, goal_y_;
+  double start_x_, start_y_, goal_x_, goal_y_,goal_yaw_;
   bool has_left_start_ = false; 
   bool is_collision_ = false;
 
@@ -457,7 +483,6 @@ private:
   double sum_a_lat_sq_;
 
   rclcpp::Time last_odom_time_;
-
 };
 
 int main(int argc, char ** argv)
