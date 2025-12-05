@@ -1,0 +1,18 @@
+t,x,y,yaw,speed,yaw_rate,a_lat,planner,min_d,track_error,collision
+
+--- Experiment Summary ---
+Scenario,Mux_Spielberg_WS1.0_WT1.0_WC1.0_WCL1.0_WD1.0_Opp_bumper_slow_1.csv
+Mode,MUX_RACING
+Finish Reason,MANUAL_ABORT (Force Quit)
+Duration (s),2.95
+Total Dist (m),0.00
+Max Speed (m/s),0.00
+Max Lat Acc (m/s^2),0.00
+Collision,NO
+FRENET Usage (%),0.00
+FGM Usage (%),0.00
+Min Dist (m),1000000000.00
+Unsafe Time (s),0.00
+Unsafe Ratio,0.00
+Track Error RMS (m),0.00
+Lat Acc RMS (m/s^2),0.00

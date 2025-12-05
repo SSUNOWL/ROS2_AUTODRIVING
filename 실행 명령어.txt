@@ -64,7 +64,7 @@ use_rviz 파라미터 false로 하면 백그라운드 자동화가능
 <테스트 시나리오 3> 수동차 나란히 주행 (네모난걸 만들어서 주행)
 ros2 launch f1tenth_gym_ros map_gym_bridge.py num_agent:=2
 
-ros2 run racecar_experiments static_path_publisher   --ros-args -p csv_path:="$(pwd)/raceline_with_yaw.csv"
+ros2 run racecar_experiments static_path_publisher   --ros-args -p csv_path:="$(pwd)/raceline_Spielberg.csv"
 
 ros2 launch racecar_frenet_cpp frenet_with_pp_profile.launch.py
 
