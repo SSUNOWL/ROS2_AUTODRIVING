@@ -20,6 +20,8 @@ find_package(visualization_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(planner_mux REQUIRED)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
@@ -82,6 +84,7 @@ ament_target_dependencies(avoid_logger
   nav_msgs
   std_msgs
   ackermann_msgs  # 정지 명령을 위해 필요
+  planner_mux
 )
 
 # install 섹션에도 추
@@ -102,6 +105,7 @@ ament_target_dependencies(run_logger
   nav_msgs
   ackermann_msgs
   std_msgs
+  planner_mux
 )
 
 # ---- install ----

@@ -46,13 +46,13 @@ def generate_launch_description():
     
     # 시나리오 이름 생성 (로그 파일용)
     scenario_name_str = PythonExpression([
-        "'Mux_' + str(", LaunchConfiguration('map_name'), ") + "
-        "'_WS' + str(", LaunchConfiguration('w_speed'), ") + "
-        "'_WT' + str(", LaunchConfiguration('w_track'), ") + "
-        "'_WC' + str(", LaunchConfiguration('w_comfort'), ") + "
-        "'_WCL' + str(", LaunchConfiguration('w_clearance'), ") + "
-        "'_WD' + str(", LaunchConfiguration('w_dynamics'), ") + "
-        "'_Opp_' + str(", LaunchConfiguration('opponent_csv_filename'), ")"
+        "'Mux_' + '", LaunchConfiguration('map_name'), "' + "
+        "'_WS' + '", LaunchConfiguration('w_speed'), "' + "
+        "'_WT' + '", LaunchConfiguration('w_track'), "' + "
+        "'_WC' + '", LaunchConfiguration('w_comfort'), "' + "
+        "'_WCL' + '", LaunchConfiguration('w_clearance'), "' + "
+        "'_WD' + '", LaunchConfiguration('w_dynamics'), "' + "
+        "'_Opp_' + '", LaunchConfiguration('opponent_csv_filename'), "'"
     ])
 
 
@@ -200,6 +200,7 @@ def generate_launch_description():
         name='mux_pure_pursuit',
         output='screen',
         parameters=[{
+            'use_frenet_path': True,
             'path_topic': '/selected_path',   # [핵심] Mux의 출력 경로를 구독
             'drive_topic': '/drive',          # 실제 구동 토픽
             'lookahead_dist': 1.0,            # 튜닝 필요

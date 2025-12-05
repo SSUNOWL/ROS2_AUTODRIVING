@@ -2,6 +2,8 @@
 #include "nav_msgs/msg/path.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "nav_msgs/msg/odometry.hpp"
+#include "planner_mux/msg/mux_status.hpp"
+
 
 #include <vector>
 #include <cmath>
@@ -10,6 +12,7 @@
 #include <limits>
 
 using std::placeholders::_1;
+using planner_mux::msg::MuxStatus;
 
 struct Metrics {
   double min_obs_dist;
@@ -80,6 +83,10 @@ public:
 
     pub_selected_ = this->create_publisher<nav_msgs::msg::Path>(
       "/selected_path", 10);
+    
+    status_pub_ = this->create_publisher<MuxStatus>(
+      "/mux_status", 10);
+
 
     timer_ = this->create_wall_timer(
       std::chrono::milliseconds(50),
@@ -92,6 +99,8 @@ public:
   }
 
 private:
+  rclcpp::Publisher<MuxStatus>::SharedPtr status_pub_;
+
   void frenet_callback(const nav_msgs::msg::Path::SharedPtr msg) {
     last_frenet_path_ = *msg;
     has_frenet_ = true;
@@ -282,6 +291,19 @@ private:
     enforce_speed_profile(selected);
     selected.header.stamp = this->now();
     pub_selected_->publish(selected);
+
+    MuxStatus st;
+    st.planner = new_planner;
+    st.mode    = new_mode;
+    st.min_d_frenet   = mf.min_obs_dist;
+    st.min_d_fgm      = mg.min_obs_dist;
+    st.track_frenet   = mf.tracking_error;
+    st.track_fgm      = mg.tracking_error;
+    st.selected_min_d = (new_planner == "FRENET" ? mf.min_obs_dist : mg.min_obs_dist);
+    st.selected_track = (new_planner == "FRENET" ? mf.tracking_error : mg.tracking_error);
+
+status_pub_->publish(st);
+
   }
 
   // ★ EMERGENCY 기준 현실화: dyn_clear_margin은 안전 판정에 사용하지 않음

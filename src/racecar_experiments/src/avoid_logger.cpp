@@ -16,8 +16,12 @@
 #include "nav_msgs/msg/path.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "ackermann_msgs/msg/ackermann_drive_stamped.hpp" // [필수] 정지 명령용
+#include "planner_mux/msg/mux_status.hpp"
+
 
 using std::placeholders::_1;
+using planner_mux::msg::MuxStatus;
+
 namespace fs = std::filesystem;
 
 class AvoidLogger : public rclcpp::Node
@@ -85,6 +89,10 @@ public:
     // [추가] 강제 정지를 위한 Publisher
     drive_pub_ = create_publisher<ackermann_msgs::msg::AckermannDriveStamped>("/drive", 10);
 
+    mux_sub_ = create_subscription<MuxStatus>(
+      "/mux_status", 10,
+      std::bind(&AvoidLogger::mux_callback, this, _1));
+
     RCLCPP_INFO(get_logger(), "AvoidLogger Initialized. Waiting for Path to define Finish Line...");
   }
 
@@ -97,6 +105,19 @@ public:
 
 private:
   // --- Callback Functions ---
+  rclcpp::Subscription<MuxStatus>::SharedPtr mux_sub_;
+
+  void mux_callback(const MuxStatus::SharedPtr msg)
+  {
+    last_planner_   = msg->planner;
+    last_min_d_     = msg->selected_min_d;
+    last_track_err_ = msg->selected_track;
+
+    last_fre_min_d_ = msg->min_d_frenet;
+    last_fgm_min_d_ = msg->min_d_fgm;
+    last_fre_track_ = msg->track_frenet;
+    last_fgm_track_ = msg->track_fgm;
+  }
 
   void path_callback(const nav_msgs::msg::Path::SharedPtr msg)
   {

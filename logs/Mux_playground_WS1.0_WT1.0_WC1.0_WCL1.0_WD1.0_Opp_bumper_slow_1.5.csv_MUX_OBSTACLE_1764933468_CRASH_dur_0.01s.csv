@@ -1,0 +1,16 @@
+t,x,y,yaw,speed,yaw_rate,a_lat,planner,min_d,track_error,fre_min_d,fgm_min_d,fre_track,fgm_track,collision
+0.000750291,-4.22963,21.5792,2.41675,0.135975,0.0133812,0.0018195,FGM,0.204922,14.2152,0.423568,0.204922,14.2178,14.2152,0
+0.0012993,-10,7.475,0,0,0,0,FGM,0.204922,14.2152,0.423568,0.204922,14.2178,14.2152,0
+0.00806786,-4.33846,21.6933,2.42737,0.0311822,0.00320467,9.99286e-05,FGM,0.204922,14.2152,0.423568,0.204922,14.2178,14.2152,0
+
+--- Experiment Summary ---
+Scenario,Mux_playground_WS1.0_WT1.0_WC1.0_WCL1.0_WD1.0_Opp_bumper_slow_1.5.csv
+Finish Reason,COLLISION DETECTED
+Duration (s),0.01
+Total Dist (m),30.54
+Collision,YES
+Min Dist (m),0.20
+Unsafe Ratio,1.00
+FGM Min Dist (m),0.20
+FGM Unsafe Ratio,1.00
+FGM Track RMS (m),14.22

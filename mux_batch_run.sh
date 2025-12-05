@@ -7,9 +7,9 @@ source install/setup.bash
 # ==========================================
 
 # 1. Mux Weight 조합 (w_speed w_track w_comfort w_clearance w_dynamics)
-# 예: "Speed중시", "안전중시", "추종중시", "밸런스"
 mux_params=(
     "1.0 1.0 1.0 1.0 1.0"   # Baseline (Balance)
+    # 필요한 만큼 추가
 )
 
 # 2. Racing Scenario Maps (Solo)
@@ -18,36 +18,46 @@ racing_maps=("Spielberg" "hairpin_combo")
 # 3. Obstacle Scenario Map & Opponents (Duo)
 obs_map="playground"
 opponent_csvs=(
+    "bumper_slow_0.5.csv"
     "bumper_slow_1.csv"
+    "bumper_slow_1.5.csv"
+    "bumper_slow_2.csv"
+    "bumper_v_2.csv"
     "bumper_v_3.csv"
-    # 필요한 만큼 상대 차량 CSV 추가 (시간 관계상 2개만 예시)
+    "bumper_v_4.csv"
+    "bumper_v_5.csv"
 )
 
+# RViz 사용 여부 (배치 돌릴때는 false 권장, 필요시 true)
+USE_RVIZ="true"
+
 # ==========================================
-# 유틸리티 함수
+# 유틸리티 함수 (강력한 프로세스 킬러)
 # ==========================================
-cleanup_ros_nodes() {
-    echo "   >>> [Cleanup] Killing ROS nodes..."
+cleanup_all_nodes() {
+    echo "   >>> [Cleanup] Killing ALL ROS nodes (Map & Simulation)..."
+    
+    # 1. 실행 중인 런치 파일들 종료
+    pkill -f "mux_auto_run.launch.py"
+    pkill -f "mux_auto_map.launch.py"
+    
+    # 2. 핵심 바이너리 강제 종료
+    pkill -f "map_server"
+    pkill -f "nav2_map_server"
+    pkill -f "lifecycle_manager"
+    pkill -f "nav2_lifecycle_manager"
     pkill -f "map_gym_bridge"
     pkill -f "robot_state_publisher"
     pkill -f "rviz2"
     pkill -f "nav2"
     pkill -f "mux_controller"
-    pkill -f "mux_auto_run.launch.py"
-    pkill -f "map_server"
-    pkill -f "nav2_map_server"
-    pkill -f "lifecycle_manager"
-    pkill -f "nav2_lifecycle_manager"
-    
-    # 이제 이 파일 하나만 끄면 됨
-    pkill -f "mux_auto_map.launch.py"
-    
     pkill -f "racecar_frenet_cpp"
     pkill -f "f1tenth_planner"
-    
+    pkill -f "run_logger"
+    pkill -f "avoid_logger"
+    pkill -f "collision_monitor"
 
-    5. 확실히 죽었는지 확인하는 대기 로직 (중요)
-    # map_server가 완전히 사라질 때까지 최대 10초 대기
+    # 3. Map Server가 완전히 죽을 때까지 대기 (Frenet 스크립트 참고)
     echo "   >>> Waiting for map_server to terminate..."
     COUNT=0
     while pgrep -f "map_server" > /dev/null; do
@@ -59,9 +69,12 @@ cleanup_ros_nodes() {
             break
         fi
     done
+    
+    # RViz도 확인 사살
+    pkill -9 -f "rviz2"
 
     echo "   >>> Cleanup Complete."
-    sleep 3
+    sleep 3  # 프로세스 정리 후 안전 대기 시간
 }
 
 # ==========================================
@@ -69,8 +82,8 @@ cleanup_ros_nodes() {
 # ==========================================
 echo "=== Phase 1: Racing Scenarios (Run Logger) ==="
 
-# 이전 프로세스 정리
-cleanup_ros_nodes
+# 최초 시작 전 정리
+cleanup_all_nodes
 
 for map_name in "${racing_maps[@]}"; do
     
@@ -84,21 +97,26 @@ for map_name in "${racing_maps[@]}"; do
     echo "------------------------------------------------"
     echo ">>> Starting Map: $map_name (1 Agent)"
     
-    # Map Launch (Frenet Map Launch 재사용 - num_agent=1)
+    # [Map Launch] 백그라운드 실행 (&)
+    # 이 노드는 내부 루프(Weight 실험)가 도는 동안 계속 살아있어야 함
     ros2 launch racecar_experiments mux_auto_map.launch.py \
         map_name:=$map_name \
         map_img_ext:=$MAP_EXT \
-        use_rviz:=true &
+        use_rviz:=$USE_RVIZ &
+    
+    # Frenet 실험 때처럼 맵이 로드되고 안정화될 때까지 충분히 기다림
     echo ">>> Waiting 15s for Map initialization..."
     sleep 15
     
-    # Weight 별 실험 수행
+    # Weight 별 실험 수행 (Inner Loop)
     for params in "${mux_params[@]}"; do
         read -r ws wt wco wcl wd <<< "$params"
         
         echo ""
         echo "   >>> [Mux Racing] Map=$map_name | Weights: S=$ws T=$wt C=$wco CL=$wcl D=$wd"
         
+        # [Run Launch] 포그라운드 실행 (이게 끝날 때까지 스크립트 대기)
+        # mux_auto_run은 실험이 끝나면(Crash/Finish) 스스로 종료됨
         ros2 launch racecar_experiments mux_auto_run.launch.py \
             map_name:=$map_name \
             w_speed:=$ws \
@@ -107,13 +125,14 @@ for map_name in "${racing_maps[@]}"; do
             w_clearance:=$wcl \
             w_dynamics:=$wd
             
-        echo "   >>> Episode finished. Cooldown..."
+        echo "   >>> Episode finished. Cooldown (3s)..."
         sleep 3
     done
     
-    # 다음 맵으로 넘어가기 전 맵 노드 종료
-    cleanup_ros_nodes
-    sleep 5
+    # [중요] 한 맵의 모든 실험이 끝났으므로, 다음 맵을 위해 모든 노드를 정리함
+    echo ">>> Finished experiments for $map_name. Cleaning up..."
+    cleanup_all_nodes
+    sleep 5 # 다음 맵 시작 전 안전 마진
 done
 
 # ==========================================
@@ -121,16 +140,18 @@ done
 # ==========================================
 echo "=== Phase 2: Obstacle Scenarios (Avoid Logger) ==="
 
-cleanup_ros_nodes
+# 혹시 모를 잔여 프로세스 정리
+cleanup_all_nodes
 
-# Playground Map 실행 (FGM Map Launch 재사용 - num_agent=2)
+# Playground Map 실행 (한 번만 실행하고 유지)
 echo "------------------------------------------------"
 echo ">>> Starting Map: $obs_map (2 Agents)"
 
 ros2 launch racecar_experiments mux_auto_map.launch.py \
     map_name:=$obs_map \
     map_img_ext:=".pgm" \
-    use_rviz:=true &
+    use_rviz:=$USE_RVIZ &
+
 echo ">>> Waiting 15s for Map initialization..."
 sleep 15
 
@@ -156,11 +177,11 @@ for opp_csv in "${opponent_csvs[@]}"; do
             w_clearance:=$wcl \
             w_dynamics:=$wd
             
-        echo "   >>> Episode finished. Cooldown..."
+        echo "   >>> Episode finished. Cooldown (3s)..."
         sleep 3
     done
 done
 
 # 전체 종료
 echo "=== All Mux Experiments Completed ==="
-cleanup_ros_nodes
+cleanup_all_nodes

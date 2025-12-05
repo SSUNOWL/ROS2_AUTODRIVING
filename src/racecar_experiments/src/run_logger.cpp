@@ -15,6 +15,8 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "std_msgs/msg/bool.hpp"
+#include "planner_mux/msg/mux_status.hpp"
+using planner_mux::msg::MuxStatus;
 
 using std::placeholders::_1;
 namespace fs = std::filesystem;
@@ -86,6 +88,9 @@ public:
     collision_sub_ = create_subscription<std_msgs::msg::Bool>(
       "/experiments/crash_detected", 10, std::bind(&RunLogger::collision_callback, this, _1));
 
+    mux_sub_ = create_subscription<MuxStatus>(
+      "/mux_status", 10,
+      std::bind(&RunLogger::mux_callback, this, _1));
     RCLCPP_INFO(get_logger(), "RunLogger initialized. Stuck timeout: %.1fs", stuck_timeout_);
   }
 
@@ -247,6 +252,15 @@ private:
           finish_logging("GOAL REACHED");
         }
       }
+  }
+
+  rclcpp::Subscription<MuxStatus>::SharedPtr mux_sub_;
+
+  void mux_callback(const MuxStatus::SharedPtr msg)
+  {
+    last_planner_   = msg->planner;
+    last_min_d_     = msg->selected_min_d;
+    last_track_err_ = msg->selected_track;
   }
 
   void check_stuck(double curr_x, double curr_y)
