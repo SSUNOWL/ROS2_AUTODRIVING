@@ -37,6 +37,11 @@ def generate_launch_description():
     w_comfort_arg = DeclareLaunchArgument('w_comfort', default_value='1.0')
     w_clearance_arg = DeclareLaunchArgument('w_clearance', default_value='1.0')
     w_dynamics_arg = DeclareLaunchArgument('w_dynamics', default_value='1.0')
+    d_min_arg = DeclareLaunchArgument(
+        'd_min',
+        default_value='0.15',
+        description='Minimum safe distance for MUX (m)'
+    )
 
     # Opponent 설정 (Playground용)
     opponent_csv_arg = DeclareLaunchArgument('opponent_csv_filename', default_value='bumper_slow_1.csv')
@@ -52,6 +57,7 @@ def generate_launch_description():
         "'_WC' + '", LaunchConfiguration('w_comfort'), "' + "
         "'_WCL' + '", LaunchConfiguration('w_clearance'), "' + "
         "'_WD' + '", LaunchConfiguration('w_dynamics'), "' + "
+        "'_DM' + '", LaunchConfiguration('d_min'), "' +" 
         "'_Opp_' + '", LaunchConfiguration('opponent_csv_filename'), "'"
     ])
 
@@ -186,7 +192,7 @@ def generate_launch_description():
             'w_clearance': LaunchConfiguration('w_clearance'),
             'w_dynamics': LaunchConfiguration('w_dynamics'),
             # Topic 이름이 cpp 기본값과 같다면 생략 가능
-            # 'd_min': 0.15, 
+            'd_min': LaunchConfiguration('d_min'),
             # 'v_ref': 5.0,
         }]
     )
@@ -235,18 +241,19 @@ def generate_launch_description():
 
     return LaunchDescription([
         map_name_arg, opponent_csv_arg,
-        w_speed_arg, w_track_arg, w_comfort_arg, w_clearance_arg, w_dynamics_arg,
+        w_speed_arg, w_track_arg, w_comfort_arg, w_clearance_arg, w_dynamics_arg, d_min_arg,
         stop_cmd,
         
         TimerAction(period=1.0, actions=[static_path_node]),
-        TimerAction(period=3.0, actions=[collision_node]),
-        TimerAction(period=3.0, actions=[run_logger_node, avoid_logger_node]),
-        TimerAction(period=4.0, actions=[opponent_pp_node]),
+        TimerAction(period=4.0, actions=[collision_node]),
+        TimerAction(period=4.0, actions=[run_logger_node, avoid_logger_node]),
         
         # Planners (Path 생성용)
         TimerAction(period=5.0, actions=[frenet_launch, fgm_launch]),
         
         # Controller (Mux -> PP)
+        TimerAction(period=6.0, actions=[opponent_pp_node]),
+
         TimerAction(period=6.0, actions=[mux_node, main_pp_node]),
 
         exit_on_run_logger,
