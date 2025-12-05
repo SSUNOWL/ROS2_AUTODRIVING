@@ -218,11 +218,13 @@ private:
                 has_left_start_ = true;
             }
         }
-        /*if (has_left_start_) {
+        /*if (has_left_start_) { // 기존 방식 : 도착 점 기준 원 범위. goal_tolerance는 도착 점과의 거리
             if (std::hypot(x - goal_x_, y - goal_y_) < goal_tolerance_) {
                 finish_logging("GOAL REACHED");
             }
         }*/
+
+        // 새로운 방식 : 도착 점 기준 트랙 폭 범위
         double dx = x - goal_x_;
         double dy = y - goal_y_;
 
@@ -238,8 +240,8 @@ private:
     // 2. long_dist < 2.0 : 도착선을 넘었지만 너무 멀리 가지 않음 (오탐지 방지용 버퍼)
     // 3. std::abs(lat_dist) < goal_tolerance_ : 도로 폭(tolerance) 이내에 있음
     
-    // 주의: 여기서 goal_tolerance_는 더 이상 '반경'이 아니라 '도로 폭의 절반' 역할을 합니다.
-    // 따라서 launch 파일에서 goal_tolerance를 도로 폭 절반(예: 2.0 ~ 3.0) 정도로 넉넉하게 주어야 합니다.
+    // 주의: 여기서 goal_tolerance_는 더 이상 '반경'이 아니라 '도로 폭의 절반' 역할.
+    // 따라서 launch 파일에서 goal_tolerance를 도로 폭 절반 정도로 설정해야함.
     
         if ((long_dist >= 0.0 && long_dist < 5.0 && std::abs(lat_dist) < goal_tolerance_) && has_left_start_) {
           finish_logging("GOAL REACHED");
