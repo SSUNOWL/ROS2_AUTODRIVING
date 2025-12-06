@@ -206,50 +206,50 @@ cleanup_all_nodes() {
     sleep 5
 }
 
-# # ==========================================
-# # [Phase 1] Racing Scenarios
-# # ==========================================
-# echo "=== Phase 1: Racing Scenarios ==="
+# ==========================================
+# [Phase 1] Racing Scenarios
+# ==========================================
+echo "=== Phase 1: Racing Scenarios ==="
 
-# cleanup_all_nodes
+cleanup_all_nodes
 
-# for map_name in "${racing_maps[@]}"; do
+for map_name in "${racing_maps[@]}"; do
     
-#     if [ "$map_name" == "Spielberg" ]; then MAP_EXT=".png"; else MAP_EXT=".pgm"; fi
+    if [ "$map_name" == "Spielberg" ]; then MAP_EXT=".png"; else MAP_EXT=".pgm"; fi
 
-#     echo "------------------------------------------------"
-#     echo ">>> [Map Setup] Starting Map: $map_name"
+    echo "------------------------------------------------"
+    echo ">>> [Map Setup] Starting Map: $map_name"
     
-#     # 맵 & RViz 실행 (백그라운드)
-#     ros2 launch racecar_experiments mux_auto_map.launch.py \
-#         map_name:=$map_name \
-#         map_img_ext:=$MAP_EXT \
-#         use_rviz:=$USE_RVIZ &
+    # 맵 & RViz 실행 (백그라운드)
+    ros2 launch racecar_experiments mux_auto_map.launch.py \
+        map_name:=$map_name \
+        map_img_ext:=$MAP_EXT \
+        use_rviz:=$USE_RVIZ &
     
-#     # RViz가 켜지고 맵이 로드될 때까지 충분히 대기
-#     echo ">>> Waiting 15s for Map & RViz initialization..."
-#     sleep 15
+    # RViz가 켜지고 맵이 로드될 때까지 충분히 대기
+    echo ">>> Waiting 15s for Map & RViz initialization..."
+    sleep 15
     
-#     for params in "${mux_params[@]}"; do
-#         read -r ws wt wco wcl wd dm <<< "$params"
-#         echo ""
-#         echo "   >>> [Run] Weights: S=$ws T=$wt..."
+    for params in "${mux_params[@]}"; do
+        read -r ws wt wco wcl wd dm <<< "$params"
+        echo ""
+        echo "   >>> [Run] Weights: S=$ws T=$wt..."
         
-#         ros2 launch racecar_experiments mux_auto_run.launch.py \
-#             map_name:=$map_name \
-#             w_speed:=$ws w_track:=$wt w_comfort:=$wco w_clearance:=$wcl w_dynamics:=$wd d_min:=$dm
+        ros2 launch racecar_experiments mux_auto_run.launch.py \
+            map_name:=$map_name \
+            w_speed:=$ws w_track:=$wt w_comfort:=$wco w_clearance:=$wcl w_dynamics:=$wd d_min:=$dm
             
-#         echo "   >>> Run Finished. Cooldown..."
+        echo "   >>> Run Finished. Cooldown..."
         
-#         # [Partial Cleanup] 지도는 끄지 않고 주행 노드만 끔
-#         cleanup_run_nodes
-#     done
+        # [Partial Cleanup] 지도는 끄지 않고 주행 노드만 끔
+        cleanup_run_nodes
+    done
     
-#     # 맵 다 썼으니 완전 종료 (RViz가 여기서 꺼짐)
-#     echo ">>> All runs for $map_name done."
-#     cleanup_all_nodes
+    # 맵 다 썼으니 완전 종료 (RViz가 여기서 꺼짐)
+    echo ">>> All runs for $map_name done."
+    cleanup_all_nodes
 
-# done
+done
 
 # ==========================================
 # [Phase 2] Obstacle Scenarios
