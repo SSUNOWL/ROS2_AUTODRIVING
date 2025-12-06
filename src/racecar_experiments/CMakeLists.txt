@@ -87,6 +87,14 @@ ament_target_dependencies(avoid_logger
   planner_mux
 )
 
+add_executable(mux_logger src/mux_logger.cpp)
+ament_target_dependencies(mux_logger
+  rclcpp
+  nav_msgs
+  std_msgs
+  ackermann_msgs  # 정지 명령을 위해 필요
+  planner_mux
+)
 # install 섹션에도 추
 
 ament_target_dependencies(opponent_pure_pursuit_node   
@@ -117,7 +125,7 @@ install(TARGETS
   opponent_replay_node
   opponent_pure_pursuit_node
   avoid_logger
-
+  mux_logger
   DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY launch

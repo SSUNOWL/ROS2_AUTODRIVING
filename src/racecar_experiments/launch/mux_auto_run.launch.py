@@ -49,7 +49,13 @@ def generate_launch_description():
     # 조건부 실행 변수
     is_playground = PythonExpression(["'", LaunchConfiguration('map_name'), "' == 'playground'"])
     
-    # 시나리오 이름 생성 (로그 파일용)
+    # [수정] Planner Mode 결정 (cpp 파라미터 이름: planner_mode)
+    # 맵이 playground면 'MUX_OBSTACLE', 아니면 'MUX_RACING'으로 전달
+    planner_mode_expr = PythonExpression([
+        "'MUX_OBSTACLE' if '", LaunchConfiguration('map_name'), "' == 'playground' else 'MUX_RACING'"
+    ])
+
+    # 시나리오 이름 생성 (로그 파일 이름용)
     scenario_name_str = PythonExpression([
         "'Mux_' + '", LaunchConfiguration('map_name'), "' + "
         "'_WS' + '", LaunchConfiguration('w_speed'), "' + "
@@ -61,11 +67,13 @@ def generate_launch_description():
         "'_Opp_' + '", LaunchConfiguration('opponent_csv_filename'), "'"
     ])
 
-
     # 경로 파일 설정
     csv_filename = PythonExpression(["'raceline_' + '", LaunchConfiguration('map_name'), "' + '.csv'"])
     ego_csv_path = PathJoinSubstitution([os.getcwd(), csv_filename])
     opponent_csv_path = PathJoinSubstitution([os.getcwd(), LaunchConfiguration('opponent_csv_filename')])
+    
+    # 로그 저장 디렉토리 (파일명 제외)
+    log_output_dir = os.path.join(os.getcwd(), 'logs')
 
     # ==============================
     # 3. Nodes Configuration
@@ -74,7 +82,7 @@ def generate_launch_description():
     # 3-1. 초기 정지
     stop_cmd = ExecuteProcess(
         cmd=['ros2', 'topic', 'pub', '-1', '/drive', 'ackermann_msgs/msg/AckermannDriveStamped',
-             "{header: {stamp: now, frame_id: ego_base_link}, drive: {steering_angle: 0.0, speed: 0.0}}"],
+             "{header: {stamp: now, frame_id: ego_racecar/base_link}, drive: {steering_angle: 0.0, speed: 0.0}}"],
         output='screen'
     )
 
@@ -120,32 +128,24 @@ def generate_launch_description():
         }]
     )
 
-    # 3-5. Loggers (조건부)
-    run_logger_node = Node(
-        condition=UnlessCondition(is_playground),
+    # [수정] 통합된 Mux Logger Node (파라미터 완전 일치)
+    mux_logger_node = Node(
         package='racecar_experiments',
-        executable='run_logger',
-        name='run_logger_node',
+        executable='mux_logger', 
+        name='mux_logger',
         output='screen',
         parameters=[{
-            'planner_mode': 'MUX_RACING',
-            'output_dir': os.path.join(os.getcwd(), 'logs'),
-            'collision_topic': '/experiments/crash_detected',
-            'scenario_name': scenario_name_str
-        }]
-    )
-
-    avoid_logger_node = Node(
-        condition=IfCondition(is_playground),
-        package='racecar_experiments',
-        executable='avoid_logger',
-        name='avoid_logger_node',
-        output='screen',
-        parameters=[{
-            'planner_mode': 'MUX_OBSTACLE',
-            'output_dir': os.path.join(os.getcwd(), 'logs'),
-            'collision_topic': '/experiments/crash_detected',
-            'scenario_name': scenario_name_str
+            # 1. 파일 저장 관련
+            'output_dir': log_output_dir,
+            'scenario_name': scenario_name_str,
+            'planner_mode': planner_mode_expr,
+            
+            # 2. 도착 및 안전 판정 (C++ 기본값과 비슷하게 설정)
+            'goal_tolerance': 1.0,        # 도착 인정 범위 (m)
+            'start_safe_dist': 2.0,       # 출발 간주 거리 (m)
+            'stuck_timeout': 5.0,         # 5초간 제자리 면 종료
+            'stuck_dist_thresh': 0.2,     # Stuck 거리 기준
+            'safe_dist_threshold': 0.5    # 안전 거리 통계 기준
         }]
     )
 
@@ -153,24 +153,43 @@ def generate_launch_description():
     # 4. Planners (Background)
     # ==============================
 
-    # 4-1. Frenet Planner (Background)
-    # [중요] Frenet 내부의 PP가 차를 움직이지 않도록 drive 토픽을 쓰레기통(/trash)으로 보냄
-    # Frenet은 '/frenet_local_plan' (Path)만 잘 발행하면 됨
+    # 4-1. Frenet Planner
     frenet_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([frenet_pkg, 'launch', 'frenet.launch.py'])
-        ),
-        # [핵심] 여기서 /drive를 Remap하여 실제 주행 간섭 방지
-        # launch 파일 내부 구조에 따라 remap 방식이 다를 수 있으나, 
-        # 일반적으로 Node 레벨 Remap이 우선 적용됨을 가정
+        )
     )
 
-    # 4-2. FGM Planner (Background)
-    # [중요] FGM 내부의 구동 명령 무시. '/fgm_path' (Path)만 필요함.
-    fgm_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            PathJoinSubstitution([planner_pkg, 'launch', 'fgm.launch.py'])
-        )
+
+    fgm_node = Node(
+        package='f1tenth_planner',
+        executable='fgm_node',
+        name='fgm_node',
+        output='screen',
+        parameters=[{
+            'base_frame': 'ego_racecar/base_link',
+            'fov_angle': 183.4000,
+            'speed_check_fov_deg': 25.3000,
+            'gap_threshold': 0.8900,
+            'bubble_radius': 0.4550,
+            'dynamic_bubble_speed_coeff': 0.1520,
+            'min_planning_dist': 2.0,
+            'max_planning_dist': 5.0,
+            'planning_gain': 1.0,
+            'min_lookahead': 1.5,
+            'max_lookahead': 3.5,
+            'lookahead_gain': 0.6,
+            'max_speed': 4.4000,
+            'required_clearance': 0.5350,
+            'width_weight': 0.5900,
+            'angle_weight': 7.6000,
+            'steer_weight': 0.0610,
+            'hysteresis_bonus': 1.7000,
+            'change_threshold': 0.1980,
+            'smoothing_alpha': 0.5050,
+            'slow_down_dist': 2.5,
+            'drive_topic': '/trash_drive' 
+        }]
     )
 
     # ==============================
@@ -178,11 +197,9 @@ def generate_launch_description():
     # ==============================
 
     # 5-1. Mux Node
-    # 입력: /frenet_local_plan, /fgm_path
-    # 출력: /selected_path
     mux_node = Node(
         package='planner_mux',
-        executable='planner_mux_node', # CMakeLists.txt의 실행 파일명 확인 필요
+        executable='planner_mux_node',
         name='local_planner_mux',
         output='screen',
         parameters=[{
@@ -191,46 +208,35 @@ def generate_launch_description():
             'w_comfort': LaunchConfiguration('w_comfort'),
             'w_clearance': LaunchConfiguration('w_clearance'),
             'w_dynamics': LaunchConfiguration('w_dynamics'),
-            # Topic 이름이 cpp 기본값과 같다면 생략 가능
             'd_min': LaunchConfiguration('d_min'),
-            # 'v_ref': 5.0,
         }]
     )
 
-    # 5-2. Main Pure Pursuit Node (Final Executor)
-    # 입력: /selected_path (Mux가 선택한 경로)
-    # 출력: /drive (실제 차량 제어)
+    # 5-2. Main Pure Pursuit Node
     main_pp_node = Node(
         package='f1tenth_planner',
-        executable='pure_pursuit_node', # 혹은 pp_node 등 실제 이름
+        executable='pure_pursuit_node',
         name='mux_pure_pursuit',
         output='screen',
         parameters=[{
             'use_frenet_path': True,
-            'path_topic': '/selected_path',   # [핵심] Mux의 출력 경로를 구독
-            'drive_topic': '/drive',          # 실제 구동 토픽
-            'lookahead_dist': 1.0,            # 튜닝 필요
-            'max_speed': 5.5,                 # Mux에서 속도 프로파일을 생성하므로 충분히 크게
+            'path_topic': '/selected_path',   
+            'drive_topic': '/drive',          
+            'lookahead_dist': 1.0,            
+            'max_speed': 5.5,                 
             'visualize_lookahead': True
         }],
-        # 만약 frenet/fgm 런치파일이 /drive를 강제로 잡고 있다면
-        # 여기서 우선순위 문제가 생길 수 있으므로, 4번 단계에서 Remap이 필수적임.
     )
 
     # ==============================
     # 6. 종료 조건 및 순서
     # ==============================
 
-    exit_on_run_logger = RegisterEventHandler(
+    # [수정] 통합 로거 종료 시 전체 실험 종료
+    exit_on_logger = RegisterEventHandler(
         event_handler=OnProcessExit(
-            target_action=run_logger_node,
-            on_exit=[LogInfo(msg="Run Logger finished."), EmitEvent(event=Shutdown())]
-        )
-    )
-    exit_on_avoid_logger = RegisterEventHandler(
-        event_handler=OnProcessExit(
-            target_action=avoid_logger_node,
-            on_exit=[LogInfo(msg="Avoid Logger finished."), EmitEvent(event=Shutdown())]
+            target_action=mux_logger_node,
+            on_exit=[LogInfo(msg="Mux Logger finished."), EmitEvent(event=Shutdown())]
         )
     )
 
@@ -246,17 +252,14 @@ def generate_launch_description():
         
         TimerAction(period=1.0, actions=[static_path_node]),
         TimerAction(period=4.0, actions=[collision_node]),
-        TimerAction(period=4.0, actions=[run_logger_node, avoid_logger_node]),
         
-        # Planners (Path 생성용)
-        TimerAction(period=5.0, actions=[frenet_launch, fgm_launch]),
+        # [수정] 통합 로거 실행
+        TimerAction(period=4.0, actions=[mux_logger_node]),
         
-        # Controller (Mux -> PP)
+        TimerAction(period=5.0, actions=[frenet_launch, fgm_node]),
         TimerAction(period=6.0, actions=[opponent_pp_node]),
-
         TimerAction(period=6.0, actions=[mux_node, main_pp_node]),
 
-        exit_on_run_logger,
-        exit_on_avoid_logger,
+        exit_on_logger,
         timeout_action
     ])

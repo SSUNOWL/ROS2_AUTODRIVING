@@ -27,6 +27,10 @@ struct Gap {
 class FGMNode : public rclcpp::Node {
 public:
     FGMNode() : Node("fgm_node") {
+        // [수정] 프레임 ID를 파라미터로 받도록 설정 (기본값은 기존 이름 유지)
+        this->declare_parameter("base_frame", "ego_racecar/base_link");
+        base_frame_ = this->get_parameter("base_frame").as_string();
+
         // --- [1] 안전 및 인식 파라미터 ---
         this->declare_parameter("gap_threshold", 1.2); 
         this->declare_parameter("bubble_radius", 0.5); 
@@ -109,7 +113,7 @@ public:
 
         path_pub_ = this->create_publisher<nav_msgs::msg::Path>("/fgm_path", 10);
 
-        RCLCPP_INFO(this->get_logger(), "FGM Curve Mode Started.");
+        RCLCPP_INFO(this->get_logger(), "FGM Curve Mode Started. Base Frame: %s", base_frame_.c_str());
     }
 
 private:
@@ -126,6 +130,9 @@ private:
     double current_speed_ = 0.0;
     
     double last_best_angle_ = 0.0; 
+
+    // [수정] 프레임 ID를 저장할 변수 추가
+    std::string base_frame_;
 
     // 기존 변수
     double gap_threshold_, bubble_radius_, fov_rad_;
@@ -156,9 +163,8 @@ private:
     void scan_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
         vector<double> ranges = clean_ranges(msg);
 
-        // 1. 속도 제어 (파라미터 적용)
+        // 1. 속도 제어
         double front_min_dist = 100.0;
-        // [Fixed] Use parameter
         for (size_t i = 0; i < ranges.size(); ++i) {
             double angle = msg->angle_min + i * msg->angle_increment;
             if (std::abs(angle) < speed_check_fov_rad_) { 
@@ -184,7 +190,7 @@ private:
             return;
         }
 
-        // 3. 최적 Gap 선정 (Dynamic Wall Clearance 적용)
+        // 3. 최적 Gap 선정
         double best_angle = 0.0;
         double max_score = -1e9;
         bool valid_gap_found = false;
@@ -194,32 +200,25 @@ private:
             global_desired_angle = get_global_goal_angle(dyn_lookahead);
         }
 
-        // [Fixed] Use parameters instead of constants
         const double MIN_DIST_FOR_CALC = 0.1;
 
         for (const auto& gap : gaps) {
             double gap_start_angle = msg->angle_min + gap.start_idx * msg->angle_increment;
             double gap_end_angle = msg->angle_min + gap.end_idx * msg->angle_increment;
 
-            // Gap의 시작점과 끝점까지의 거리 가져오기
             double start_dist = std::max(ranges[gap.start_idx], MIN_DIST_FOR_CALC);
             double end_dist   = std::max(ranges[gap.end_idx], MIN_DIST_FOR_CALC);
 
-            // [핵심 공식] 파라미터 적용 (required_clearance_)
             double start_margin = std::atan(required_clearance_ / start_dist);
             double end_margin   = std::atan(required_clearance_ / end_dist);
 
-            // Gap 범위 축소 (Safety Clipping)
             double safe_min_angle = gap_start_angle + start_margin;
             double safe_max_angle = gap_end_angle - end_margin;
 
-            // 마진을 뺐더니 갈 곳이 없다면 패스
             if (safe_min_angle >= safe_max_angle) continue;
 
-            // 1. 타겟 후보 선정
             double target_angle_in_gap = (safe_min_angle + safe_max_angle) / 2.0;
 
-            // 2. Global Path 수렴 로직 (Safe Zone 내에서만)
             if (has_global_path_) {
                 if (global_desired_angle >= safe_min_angle && global_desired_angle <= safe_max_angle) {
                     target_angle_in_gap = (target_angle_in_gap * 0.3) + (global_desired_angle * 0.7);
@@ -232,14 +231,12 @@ private:
                 }
             }
 
-            // 점수 계산 (파라미터 가중치 적용)
             double width_score = gap.len; 
             double angle_diff = std::abs(target_angle_in_gap - global_desired_angle);
-            double steer_penalty = std::abs(target_angle_in_gap) * 5.0; // steer penalty scaling factor is usually kept internal or added as param
+            double steer_penalty = std::abs(target_angle_in_gap) * 5.0; 
 
             double score = (width_score * width_weight_) - (angle_diff * angle_weight_) - (steer_penalty * steer_weight_);
 
-            // 히스테리시스 적용 (파라미터 사용)
             if (std::abs(target_angle_in_gap - last_best_angle_) < change_threshold_) {
                 score += hysteresis_bonus_;
             }
@@ -252,7 +249,6 @@ private:
         }
 
         if (!valid_gap_found) {
-             // 비상 모드
              int max_len = -1;
              for(auto &g : gaps) {
                  if(g.len > max_len) {
@@ -262,11 +258,9 @@ private:
              }
         }
 
-        // 평활화 (파라미터 적용)
         best_angle = (smoothing_alpha_ * best_angle) + ((1.0 - smoothing_alpha_) * last_best_angle_);
         last_best_angle_ = best_angle;
 
-        // 충돌 체크
         int check_idx = static_cast<int>((best_angle - msg->angle_min) / msg->angle_increment);
         int window = 3;
         double sum_dist = 0; int cnt = 0;
@@ -287,8 +281,9 @@ private:
     double get_global_goal_angle(double lookahead_dist) {
         if (global_path_.poses.empty()) return 0.0;
         try {
-            if (!tf_buffer_->canTransform("map", "ego_racecar/base_link", rclcpp::Time(0))) return 0.0;
-            geometry_msgs::msg::TransformStamped t = tf_buffer_->lookupTransform("map", "ego_racecar/base_link", rclcpp::Time(0));
+            // [수정] 파라미터 변수 base_frame_ 사용
+            if (!tf_buffer_->canTransform("map", base_frame_, rclcpp::Time(0))) return 0.0;
+            geometry_msgs::msg::TransformStamped t = tf_buffer_->lookupTransform("map", base_frame_, rclcpp::Time(0));
             
             double my_x = t.transform.translation.x;
             double my_y = t.transform.translation.y;
@@ -339,7 +334,6 @@ private:
         }
 
         if (closest_idx != -1) {
-            // [Fixed] Use dynamic_bubble_coeff_ parameter
             double dynamic_radius = bubble_radius_ + (std::abs(current_speed_) * dynamic_bubble_coeff_); 
             int radius_idx = static_cast<int>(dynamic_radius / (min_dist * angle_increment));
             int start_idx = std::max(0, closest_idx - radius_idx);
@@ -400,8 +394,9 @@ private:
 
         geometry_msgs::msg::TransformStamped t;
         try {
-            if (!tf_buffer_->canTransform("map", "ego_racecar/base_link", rclcpp::Time(0))) return;
-            t = tf_buffer_->lookupTransform("map", "ego_racecar/base_link", rclcpp::Time(0));
+            // [수정] 파라미터 변수 base_frame_ 사용
+            if (!tf_buffer_->canTransform("map", base_frame_, rclcpp::Time(0))) return;
+            t = tf_buffer_->lookupTransform("map", base_frame_, rclcpp::Time(0));
         } catch (tf2::TransformException &ex) { return; }
 
         double car_x = t.transform.translation.x;
