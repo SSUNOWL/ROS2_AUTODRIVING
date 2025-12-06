@@ -16,6 +16,7 @@ from launch.substitutions import LaunchConfiguration, PythonExpression, PathJoin
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 from launch.conditions import IfCondition, UnlessCondition
+from launch.actions import GroupAction
 
 def generate_launch_description():
     # ==============================
@@ -250,13 +251,17 @@ def generate_launch_description():
         period=100.0,
         actions=[LogInfo(msg="Timeout reached."), EmitEvent(event=Shutdown())]
     )
+    conditional_stop_opp = GroupAction(
+        condition=IfCondition(is_playground), # playground일 때만 실행!
+        actions=[stop_opp_cmd]
+    )
 
     return LaunchDescription([
         map_name_arg, opponent_csv_arg,
         w_speed_arg, w_track_arg, w_comfort_arg, w_clearance_arg, w_dynamics_arg, d_min_arg,
 
         stop_cmd,
-        stop_opp_cmd,
+        conditional_stop_opp,
         TimerAction(period=1.0, actions=[static_path_node]),
         TimerAction(period=4.0, actions=[collision_node]),
         
