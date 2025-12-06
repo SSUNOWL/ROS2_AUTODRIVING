@@ -1,0 +1,14 @@
+t,x,y,yaw,speed,yaw_rate,a_lat,planner,min_d,track_error,fre_min_d,fgm_min_d,fre_track,fgm_track,collision
+6.1875e-05,24.4315,8.68338,-0.0001104,0.129287,-0.0188084,-0.00243169,FRENET,0,3.0261,0,0,3.0261,1.08728,0
+
+--- Experiment Summary ---
+Scenario,Mux_playground_WS0.8282_WT1.5812_WC2.5276_WCL1.8827_WD1.0338_DM0.2171_Opp_bumper_slow_1.csv
+Finish Reason,GOAL REACHED
+Duration (s),0.00
+Total Dist (m),0.00
+Collision,NO
+Min Dist (m),0.00
+Unsafe Ratio,1.00
+FGM Min Dist (m),1000000000.00
+FGM Unsafe Ratio,0.00
+FGM Track RMS (m),0.00

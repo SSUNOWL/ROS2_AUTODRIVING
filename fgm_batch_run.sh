@@ -79,7 +79,7 @@ ros2 launch racecar_experiments fgm_auto_map.launch.py \
 
 # 맵과 Gym Bridge가 완전히 로드될 때까지 충분히 대기 (중요)
 echo ">>> Map launching... Waiting 15s for initialization..."
-sleep 15
+sleep 10
 
 # ------------------------------------------------------------------
 # 2. 실험 루프 시작 (상대 차량 CSV -> 파라미터)
