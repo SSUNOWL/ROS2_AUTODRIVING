@@ -84,6 +84,12 @@ def generate_launch_description():
         cmd=['ros2', 'topic', 'pub', '-1', '/drive', 'ackermann_msgs/msg/AckermannDriveStamped',
              "{header: {stamp: now, frame_id: ego_racecar/base_link}, drive: {steering_angle: 0.0, speed: 0.0}}"],
         output='screen'
+        
+    )
+    stop_opp_cmd = ExecuteProcess(
+        cmd=['ros2', 'topic', 'pub', '-1', '/opp_drive', 'ackermann_msgs/msg/AckermannDriveStamped',
+                "{header: {stamp: now, frame_id: opp_racecar/base_link}, drive: {steering_angle: 0.0, speed: 0.0}}"],
+        output='screen'
     )
 
     # 3-2. Static Path Publisher
@@ -142,7 +148,7 @@ def generate_launch_description():
             
             # 2. 도착 및 안전 판정 (C++ 기본값과 비슷하게 설정)
             'goal_tolerance': 1.0,        # 도착 인정 범위 (m)
-            'start_safe_dist': 2.0,       # 출발 간주 거리 (m)
+            'start_safe_dist': 5.0,       # 출발 간주 거리 (m)
             'stuck_timeout': 5.0,         # 5초간 제자리 면 종료
             'stuck_dist_thresh': 0.2,     # Stuck 거리 기준
             'safe_dist_threshold': 0.5    # 안전 거리 통계 기준
@@ -248,8 +254,9 @@ def generate_launch_description():
     return LaunchDescription([
         map_name_arg, opponent_csv_arg,
         w_speed_arg, w_track_arg, w_comfort_arg, w_clearance_arg, w_dynamics_arg, d_min_arg,
+
         stop_cmd,
-        
+        stop_opp_cmd,
         TimerAction(period=1.0, actions=[static_path_node]),
         TimerAction(period=4.0, actions=[collision_node]),
         

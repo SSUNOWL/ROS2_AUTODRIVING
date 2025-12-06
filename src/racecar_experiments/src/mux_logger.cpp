@@ -36,7 +36,7 @@ public:
     
     // 도착 판정 관련 (RunLogger 방식: 도로 폭 고려)
     goal_tolerance_ = declare_parameter<double>("goal_tolerance", 1.5); 
-    start_safe_dist_ = declare_parameter<double>("start_safe_dist", 2.0);
+    start_safe_dist_ = declare_parameter<double>("start_safe_dist", 5.0);
 
     // Stuck 및 안전 관련
     stuck_timeout_ = declare_parameter<double>("stuck_timeout", 5.0);
