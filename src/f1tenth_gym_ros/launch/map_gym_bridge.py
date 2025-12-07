@@ -91,13 +91,14 @@ def generate_launch_description():
         ]
     )
     
-    # (3) RViz (조건부 실행 적용됨)
-    rviz_config_file_name = PythonExpression([
-        "'gym_bridge_opp.rviz' if int(", num_agent_config, ") > 1 else 'gym_bridge.rviz'"
-    ])
+    # # (3) RViz (조건부 실행 적용됨)
+    # rviz_config_file_name = PythonExpression([
+    #    "gym_bridge.rviz"
+    # ])
 
     rviz_config_path = PathJoinSubstitution([
-        gym_package_share, 'launch', rviz_config_file_name
+        gym_package_share, 'launch', "gym_bridge.rviz"
+
     ])
 
     rviz_node = Node(
