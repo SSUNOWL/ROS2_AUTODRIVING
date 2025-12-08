@@ -257,7 +257,7 @@ mux_params=(
 # "1.57 2.36 1.60 2.44 2.73 0.57"
 # "0.95 2.14 1.46 2.31 2.61 0.53"
 
-"2.80 1.32 0.84 1.37 1.65 0.43"
+"2.49 1.48 0.84 1.27 1.35 0.37"
 
 )
 
@@ -267,13 +267,13 @@ mux_params=(
 racing_maps=("Spielberg" "hairpin_combo")
 obs_map="playground"
 opponent_csvs=(
-    # "bumper_slow_0.5.csv"
-    # "bumper_slow_1.csv"
-    # "bumper_slow_1.5.csv"
-    # "bumper_slow_2.csv"
-    # "bumper_v_2.csv"
-    # "bumper_v_3.csv"
-    # "bumper_v_4.csv"
+    "bumper_slow_0.5.csv"
+    "bumper_slow_1.csv"
+    "bumper_slow_1.5.csv"
+    "bumper_slow_2.csv"
+    "bumper_v_2.csv"
+    "bumper_v_3.csv"
+    "bumper_v_4.csv"
     "bumper_v_5.csv"    
     
 )
