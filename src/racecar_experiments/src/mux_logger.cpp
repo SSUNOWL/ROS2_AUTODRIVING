@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <iostream>
 #include <sstream>
+#include <thread> // [NEW] 타이밍 문제를 해결하기 위한 헤더 추가
 
 #include "rclcpp/rclcpp.hpp"
 #include "nav_msgs/msg/odometry.hpp"
@@ -84,6 +85,8 @@ public:
     // [NEW] 상대 차량 정지를 위한 Publisher 추가
     opp_drive_pub_ = create_publisher<ackermann_msgs::msg::AckermannDriveStamped>("/opp_drive", 10);
     
+    goal_reached_pub_ = create_publisher<std_msgs::msg::Bool>("/experiments/goal_reached", 10);
+
     RCLCPP_INFO(get_logger(), "MuxLogger Initialized. Waiting for Path...");
   }
 
@@ -227,13 +230,12 @@ private:
         }
     }
   }
-
-  // [수정] 자차 및 상대차 정지 명령 발행
+  
   void publish_stop_command()
   {
       rclcpp::Time now_t = this->now();
 
-      // 1. Ego Car Stop
+      // 1. Ego Car Stop (즉시 정지)
       ackermann_msgs::msg::AckermannDriveStamped drive_msg;
       drive_msg.header.stamp = now_t;
       drive_msg.header.frame_id = "ego_base_link";
@@ -241,13 +243,22 @@ private:
       drive_msg.drive.speed = 0.0;
       drive_pub_->publish(drive_msg);
 
-      // 2. Opponent Car Stop (NEW)
+      // 2. Opponent Car Stop
       ackermann_msgs::msg::AckermannDriveStamped opp_msg;
       opp_msg.header.stamp = now_t;
       opp_msg.header.frame_id = "opp_base_link";
       opp_msg.drive.steering_angle = 0.0;
       opp_msg.drive.speed = 0.0;
       opp_drive_pub_->publish(opp_msg);
+  }
+
+  // [NEW] Pure Pursuit 노드에게 종료 신호 전송
+  void publish_goal_reached_signal()
+  {
+      std_msgs::msg::Bool msg;
+      msg.data = true;
+      goal_reached_pub_->publish(msg);
+      RCLCPP_INFO(get_logger(), "Sent GOAL REACHED signal to Controller.");
   }
 
   void check_stuck(double curr_x, double curr_y)
@@ -287,8 +298,29 @@ private:
     if (current_state_ == FINISHED) return;
     current_state_ = FINISHED;
     
-    // [중요] 종료 전 정지 명령 발행 (자차 + 상대차)
+    // ---------------------------------------------------------
+    // [수정된 부분] 종료 시퀀스 강화 (정지 신호 확실히 보내기)
+    // ---------------------------------------------------------
+    RCLCPP_WARN(get_logger(), "Experiment Finishing... Sending STOP signals.");
+
+    // 1. 즉시 정지 신호 및 Goal 신호 발행
     publish_stop_command();
+    if (reason.find("GOAL") != std::string::npos) {
+        publish_goal_reached_signal();
+    }
+
+    // 2. 메시지가 다른 노드에 도착할 시간을 벌어줌 (0.5초 대기)
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    // 3. 확실하게 하기 위해 한 번 더 보냄 (확인 사살)
+    publish_stop_command();
+    if (reason.find("GOAL") != std::string::npos) {
+        publish_goal_reached_signal();
+    }
+    
+    // 4. 또 0.5초 대기 (총 1초 지연 종료)
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    // ---------------------------------------------------------
     
     if (ofs_.is_open()) ofs_.close();
     
@@ -378,6 +410,7 @@ private:
   long cnt_frenet_, cnt_fgm_, cnt_total_;
   std::string last_planner_ {"NONE"};
   double last_min_d_, last_track_err_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr goal_reached_pub_;
   double last_fre_min_d_, last_fgm_min_d_, last_fre_track_, last_fgm_track_;
   double min_d_min_, unsafe_time_, total_time_, sum_track_err_sq_, sum_a_lat_sq_;
   double fgm_min_d_min_, fgm_unsafe_time_, fgm_total_time_, fgm_sum_track_err_sq_;

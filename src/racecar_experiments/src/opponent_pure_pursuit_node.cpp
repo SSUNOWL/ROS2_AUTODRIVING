@@ -3,6 +3,7 @@
 #include <ackermann_msgs/msg/ackermann_drive_stamped.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <geometry_msgs/msg/point.hpp>
+#include <std_msgs/msg/bool.hpp> 
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
@@ -18,7 +19,7 @@
 using namespace std;
 
 struct Waypoint {
-    double t;   // [NEW] 시간 정보 추가
+    double t;
     double x;
     double y;
     double yaw; 
@@ -33,7 +34,7 @@ public:
         this->declare_parameter("lookahead_min", 0.5); 
         this->declare_parameter("lookahead_gain", 0.4); 
         this->declare_parameter("wheelbase", 0.33);
-        this->declare_parameter("max_speed", 100.0); // CSV 본연의 속도를 내기 위해 제한 품
+        this->declare_parameter("max_speed", 100.0);
         
         this->declare_parameter("odom_topic", "/opp_racecar/odom");
         this->declare_parameter("drive_topic", "/opp_drive");
@@ -58,7 +59,9 @@ public:
 
         // --- 초기화 ---
         last_closest_idx_ = 0;
-        start_time_initialized_ = false; // [NEW] 시간 초기화 플래그
+        start_time_initialized_ = false;
+        is_goal_reached_ = false; 
+        is_crashed_ = false; // [NEW] 충돌 상태 초기화
 
         // --- Pub/Sub ---
         drive_pub_ = this->create_publisher<ackermann_msgs::msg::AckermannDriveStamped>(drive_topic, 10);
@@ -73,6 +76,16 @@ public:
             qos,
             std::bind(&OpponentPurePursuit::odom_callback, this, std::placeholders::_1));
 
+        // 목표 도달 신호 구독
+        goal_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+            "/experiments/goal_reached", 10,
+            std::bind(&OpponentPurePursuit::goal_callback, this, std::placeholders::_1));
+
+        // [NEW] 충돌 감지 신호 구독 (Collision Monitor)
+        crash_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+            "/experiments/crash_detected", 10,
+            std::bind(&OpponentPurePursuit::crash_callback, this, std::placeholders::_1));
+
         RCLCPP_INFO(this->get_logger(), "Opponent Node Ready. Time-Synchronized Mode.");
     }
 
@@ -81,6 +94,12 @@ private:
     rclcpp::Publisher<ackermann_msgs::msg::AckermannDriveStamped>::SharedPtr drive_pub_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr vis_pub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+    
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr goal_sub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr crash_sub_; // [NEW]
+
+    bool is_goal_reached_; 
+    bool is_crashed_; // [NEW] 충돌 상태 플래그
 
     double lookahead_min_;
     double lookahead_gain_;
@@ -89,9 +108,35 @@ private:
 
     int last_closest_idx_;
     
-    // [NEW] 시간 동기화 관련 변수
     rclcpp::Time start_time_;
     bool start_time_initialized_;
+
+    // 목표 도달 콜백
+    void goal_callback(const std_msgs::msg::Bool::SharedPtr msg) {
+        if (msg->data) {
+            if (!is_goal_reached_) {
+                is_goal_reached_ = true;
+                RCLCPP_INFO(this->get_logger(), "Opponent Car: Goal Reached Received -> STOPPING.");
+            }
+        } else {
+            is_goal_reached_ = false;
+        }
+    }
+
+    // [NEW] 충돌 감지 콜백
+    void crash_callback(const std_msgs::msg::Bool::SharedPtr msg) {
+        if (msg->data) {
+            if (!is_crashed_) {
+                is_crashed_ = true;
+                RCLCPP_WARN(this->get_logger(), "Opponent Car: CRASH DETECTED -> EMERGENCY STOP.");
+            }
+        } else {
+            if (is_crashed_) {
+                is_crashed_ = false;
+                RCLCPP_INFO(this->get_logger(), "Opponent Car: Crash Cleared -> Resuming.");
+            }
+        }
+    }
 
     bool load_waypoints(string path) {
         ifstream file(path);
@@ -109,9 +154,8 @@ private:
 
             Waypoint wp;
             try {
-                // time, x, y, yaw, speed
                 if (row.size() >= 5) {
-                    wp.t = stod(row[0]); // [NEW] 시간 파싱
+                    wp.t = stod(row[0]);
                     wp.x = stod(row[1]);
                     wp.y = stod(row[2]);
                     wp.yaw = stod(row[3]);
@@ -123,16 +167,12 @@ private:
         return !waypoints_.empty();
     }
 
-    // 현재 경과 시간(elapsed)에 해당하는 목표 속도를 찾는 함수
     double get_speed_at_time(double elapsed_time) {
         if (waypoints_.empty()) return 0.0;
         
-        // CSV의 마지막 시간보다 더 지났으면 멈춤 (혹은 루프)
         if (elapsed_time > waypoints_.back().t) return 0.0;
-        if (elapsed_time < waypoints_.front().t) return 0.0; // 아직 시작 전
+        if (elapsed_time < waypoints_.front().t) return 0.0;
 
-        // 이진 탐색 등으로 최적화할 수 있지만, 데이터가 순차적이므로 간단히 구현
-        // (더 정확하려면 lower_bound 사용 추천)
         auto it = std::lower_bound(waypoints_.begin(), waypoints_.end(), elapsed_time, 
             [](const Waypoint& wp, double t) {
                 return wp.t < t;
@@ -141,7 +181,6 @@ private:
         if (it == waypoints_.end()) return waypoints_.back().v;
         if (it == waypoints_.begin()) return waypoints_.front().v;
 
-        // 보간(Interpolation)은 굳이 안 해도 됨 (데이터가 촘촘하므로)
         return it->v;
     }
 
@@ -150,9 +189,18 @@ private:
     }
 
     void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg) {
+        // [수정] 목표 도달 또는 충돌 감지 시 강제 정지
+        if (is_goal_reached_ || is_crashed_) {
+            ackermann_msgs::msg::AckermannDriveStamped stop_msg;
+            stop_msg.header = msg->header;
+            stop_msg.drive.steering_angle = 0.0;
+            stop_msg.drive.speed = 0.0;
+            drive_pub_->publish(stop_msg);
+            return; // 더 이상 계산하지 않고 리턴
+        }
+
         if (waypoints_.empty()) return;
 
-        // [NEW] 첫 실행 시 시작 시간 기록
         if (!start_time_initialized_) {
             start_time_ = this->now();
             start_time_initialized_ = true;
@@ -172,7 +220,7 @@ private:
         double roll, pitch, yaw;
         m.getRPY(roll, pitch, yaw);
 
-        // 1. 위치 기반으로 '가장 가까운 점' 찾기 (조향용)
+        // 1. 위치 기반으로 '가장 가까운 점' 찾기
         int search_range = 500;
         int closest_idx = last_closest_idx_;
         double min_dist_sq = 1e9;
@@ -219,11 +267,10 @@ private:
             steering_angle = std::atan2(2.0 * wheelbase_ * local_y, L_sq);
         }
 
-        // 4. [핵심] 속도는 '시간'을 기준으로 결정 (Replay 방식)
+        // 4. 속도 계산 (Time-based Replay)
         double elapsed_sec = (this->now() - start_time_).seconds();
         double time_based_speed = get_speed_at_time(elapsed_sec);
 
-        // 최대 속도 제한
         if (max_speed_ > 0.0) {
             time_based_speed = std::min(time_based_speed, max_speed_);
         }
@@ -234,8 +281,6 @@ private:
         drive_msg.header = msg->header;
         drive_msg.header.frame_id = "map";
         drive_msg.drive.steering_angle = steering_angle;
-        
-        // 여기서 위치 기반 target.v가 아니라 시간 기반 speed를 넣음!
         drive_msg.drive.speed = time_based_speed; 
         
         drive_pub_->publish(drive_msg);
