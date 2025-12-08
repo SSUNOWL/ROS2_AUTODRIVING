@@ -56,7 +56,7 @@ public:
     max_dv_step_mux_ = this->declare_parameter("max_dv_step_mux", 0.25);
 
     // 히스테리시스 파라미터
-    switch_min_interval_ = this->declare_parameter("switch_min_interval", 0.3); // 최소 0.3초 유지
+    switch_min_interval_ = this->declare_parameter("switch_min_interval", 0.8); // 최소 0.8초 유지
     switch_score_margin_ = this->declare_parameter("switch_score_margin", 0.15); // 점수 0.15 이상 좋아야 갈아탐
 
     last_switch_time_ = this->now();
