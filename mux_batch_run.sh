@@ -256,9 +256,11 @@ mux_params=(
 # "2.77 1.18 0.92 1.54 1.82 0.45"
 # "1.57 2.36 1.60 2.44 2.73 0.57"
 # "0.95 2.14 1.46 2.31 2.61 0.53"
-
-"2.80 1.32 0.84 1.37 1.65 0.43"
-
+# "1.63 1.46 0.90 1.19 0.47 0.42"
+# "2.95 1.34 0.89 1.42 1.67 0.43 "
+# "2.62 1.59 0.71 1.12 1.09 0.31"
+"0.93	2.02	1.36	2.20	2.46	0.48"
+# "1.5232 2.2839 1.1423 1.2898 1.2642 0.1799"
 )
 
 
@@ -267,13 +269,13 @@ mux_params=(
 racing_maps=("Spielberg" "hairpin_combo")
 obs_map="playground"
 opponent_csvs=(
-    # "bumper_slow_0.5.csv"
-    # "bumper_slow_1.csv"
-    # "bumper_slow_1.5.csv"
-    # "bumper_slow_2.csv"
-    # "bumper_v_2.csv"
-    # "bumper_v_3.csv"
-    # "bumper_v_4.csv"
+    "bumper_slow_0.5.csv"
+    "bumper_slow_1.csv"
+    "bumper_slow_1.5.csv"
+    "bumper_slow_2.csv"
+    "bumper_v_2.csv"
+    "bumper_v_3.csv"
+    "bumper_v_4.csv"
     "bumper_v_5.csv"    
     
 )
@@ -360,47 +362,47 @@ cleanup_all_nodes() {
 # ==========================================
 # [Phase 1] Racing Scenarios
 # ==========================================
-echo "=== Phase 1: Racing Scenarios ==="
+# echo "=== Phase 1: Racing Scenarios ==="
 
-cleanup_all_nodes
+# cleanup_all_nodes
 
-for map_name in "${racing_maps[@]}"; do
+# for map_name in "${racing_maps[@]}"; do
     
-    if [ "$map_name" == "Spielberg" ]; then MAP_EXT=".png"; else MAP_EXT=".pgm"; fi
+#     if [ "$map_name" == "Spielberg" ]; then MAP_EXT=".png"; else MAP_EXT=".pgm"; fi
 
-    echo "------------------------------------------------"
-    echo ">>> [Map Setup] Starting Map: $map_name"
+#     echo "------------------------------------------------"
+#     echo ">>> [Map Setup] Starting Map: $map_name"
     
-    # 맵 & RViz 실행 (백그라운드)
-    ros2 launch racecar_experiments mux_auto_map.launch.py \
-        map_name:=$map_name \
-        map_img_ext:=$MAP_EXT \
-        use_rviz:=$USE_RVIZ &
+#     # 맵 & RViz 실행 (백그라운드)
+#     ros2 launch racecar_experiments mux_auto_map.launch.py \
+#         map_name:=$map_name \
+#         map_img_ext:=$MAP_EXT \
+#         use_rviz:=$USE_RVIZ &
     
-    # RViz가 켜지고 맵이 로드될 때까지 충분히 대기
-    echo ">>> Waiting 15s for Map & RViz initialization..."
-    sleep 15
+#     # RViz가 켜지고 맵이 로드될 때까지 충분히 대기
+#     echo ">>> Waiting 15s for Map & RViz initialization..."
+#     sleep 15
     
-    for params in "${mux_params[@]}"; do
-        read -r ws wt wco wcl wd dm <<< "$params"
-        echo ""
-        echo "   >>> [Run] Weights: S=$ws T=$wt..."
+#     for params in "${mux_params[@]}"; do
+#         read -r ws wt wco wcl wd dm <<< "$params"
+#         echo ""
+#         echo "   >>> [Run] Weights: S=$ws T=$wt..."
         
-        ros2 launch racecar_experiments mux_auto_run.launch.py \
-            map_name:=$map_name \
-            w_speed:=$ws w_track:=$wt w_comfort:=$wco w_clearance:=$wcl w_dynamics:=$wd d_min:=$dm
+#         ros2 launch racecar_experiments mux_auto_run.launch.py \
+#             map_name:=$map_name \
+#             w_speed:=$ws w_track:=$wt w_comfort:=$wco w_clearance:=$wcl w_dynamics:=$wd d_min:=$dm
             
-        echo "   >>> Run Finished. Cooldown..."
+#         echo "   >>> Run Finished. Cooldown..."
         
-        # [Partial Cleanup] 지도는 끄지 않고 주행 노드만 끔
-        cleanup_run_nodes
-    done
+#         # [Partial Cleanup] 지도는 끄지 않고 주행 노드만 끔
+#         cleanup_run_nodes
+#     done
     
-    # 맵 다 썼으니 완전 종료 (RViz가 여기서 꺼짐)
-    echo ">>> All runs for $map_name done."
-    cleanup_all_nodes
+#     # 맵 다 썼으니 완전 종료 (RViz가 여기서 꺼짐)
+#     echo ">>> All runs for $map_name done."
+#     cleanup_all_nodes
 
-done
+# done
 
 # ==========================================
 # [Phase 2] Obstacle Scenarios
