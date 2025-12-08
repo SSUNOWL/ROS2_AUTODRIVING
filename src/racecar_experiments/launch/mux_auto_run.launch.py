@@ -19,44 +19,26 @@ from launch.conditions import IfCondition, UnlessCondition
 from launch.actions import GroupAction
 
 def generate_launch_description():
-    # ==============================
-    # 1. 패키지 경로 설정
-    # ==============================
+    # ... (상단 패키지 및 인자 설정 코드는 기존과 동일) ...
     exp_pkg = FindPackageShare('racecar_experiments')
     frenet_pkg = FindPackageShare('racecar_frenet_cpp')
-    planner_pkg = FindPackageShare('f1tenth_planner') # FGM 패키지
+    planner_pkg = FindPackageShare('f1tenth_planner')
 
-    # ==============================
-    # 2. Arguments Definition
-    # ==============================
-    # 공통 설정
     map_name_arg = DeclareLaunchArgument('map_name', default_value='playground')
-    
-    # Mux Weights (가변 파라미터)
     w_speed_arg = DeclareLaunchArgument('w_speed', default_value='1.0')
     w_track_arg = DeclareLaunchArgument('w_track', default_value='1.0')
     w_comfort_arg = DeclareLaunchArgument('w_comfort', default_value='1.0')
     w_clearance_arg = DeclareLaunchArgument('w_clearance', default_value='1.0')
     w_dynamics_arg = DeclareLaunchArgument('w_dynamics', default_value='1.0')
-    d_min_arg = DeclareLaunchArgument(
-        'd_min',
-        default_value='0.15',
-        description='Minimum safe distance for MUX (m)'
-    )
-
-    # Opponent 설정 (Playground용)
+    d_min_arg = DeclareLaunchArgument('d_min', default_value='0.15')
     opponent_csv_arg = DeclareLaunchArgument('opponent_csv_filename', default_value='bumper_slow_1.csv')
 
-    # 조건부 실행 변수
     is_playground = PythonExpression(["'", LaunchConfiguration('map_name'), "' == 'playground'"])
     
-    # [수정] Planner Mode 결정 (cpp 파라미터 이름: planner_mode)
-    # 맵이 playground면 'MUX_OBSTACLE', 아니면 'MUX_RACING'으로 전달
     planner_mode_expr = PythonExpression([
         "'MUX_OBSTACLE' if '", LaunchConfiguration('map_name'), "' == 'playground' else 'MUX_RACING'"
     ])
 
-    # 시나리오 이름 생성 (로그 파일 이름용)
     scenario_name_str = PythonExpression([
         "'Mux_' + '", LaunchConfiguration('map_name'), "' + "
         "'_WS' + '", LaunchConfiguration('w_speed'), "' + "
@@ -68,24 +50,20 @@ def generate_launch_description():
         "'_Opp_' + '", LaunchConfiguration('opponent_csv_filename'), "'"
     ])
 
-    # 경로 파일 설정
     csv_filename = PythonExpression(["'raceline_' + '", LaunchConfiguration('map_name'), "' + '.csv'"])
     ego_csv_path = PathJoinSubstitution([os.getcwd(), csv_filename])
     opponent_csv_path = PathJoinSubstitution([os.getcwd(), LaunchConfiguration('opponent_csv_filename')])
     
-    # 로그 저장 디렉토리 (파일명 제외)
     log_output_dir = os.path.join(os.getcwd(), 'logs')
 
     # ==============================
     # 3. Nodes Configuration
     # ==============================
 
-    # 3-1. 초기 정지
     stop_cmd = ExecuteProcess(
         cmd=['ros2', 'topic', 'pub', '-1', '/drive', 'ackermann_msgs/msg/AckermannDriveStamped',
              "{header: {stamp: now, frame_id: ego_racecar/base_link}, drive: {steering_angle: 0.0, speed: 0.0}}"],
         output='screen'
-        
     )
     stop_opp_cmd = ExecuteProcess(
         cmd=['ros2', 'topic', 'pub', '-1', '/opp_drive', 'ackermann_msgs/msg/AckermannDriveStamped',
@@ -93,11 +71,12 @@ def generate_launch_description():
         output='screen'
     )
 
-    # 3-2. Static Path Publisher
-    static_path_node = Node(
+    # [수정] Static Path Publisher를 2번 정의 (재실행 보장을 위해 이름을 다르게)
+    # 1차 시도 (1.0초)
+    static_path_node_1 = Node(
         package='racecar_experiments',
         executable='static_path_publisher',
-        name='static_path_publisher',
+        name='static_path_publisher_1',
         output='screen',
         parameters=[{
             'csv_path': ego_csv_path,
@@ -108,7 +87,21 @@ def generate_launch_description():
         }]
     )
 
-    # 3-3. Opponent Controller (Playground Only)
+    # 2차 시도 (2.5초 - 확실한 위치 고정용)
+    static_path_node_2 = Node(
+        package='racecar_experiments',
+        executable='static_path_publisher',
+        name='static_path_publisher_2',
+        output='screen',
+        parameters=[{
+            'csv_path': ego_csv_path,
+            'opponent_csv_path': opponent_csv_path,
+            'spawn_opponent_enabled': is_playground,
+            'topic_name': '/plan',
+            'opponent_spawn_topic': '/goal_pose'
+        }]
+    )
+
     opponent_pp_node = Node(
         condition=IfCondition(is_playground),
         package='racecar_experiments',
@@ -123,7 +116,6 @@ def generate_launch_description():
         }]
     )
 
-    # 3-4. Collision Monitor
     collision_node = Node(
         package='racecar_experiments',
         executable='collision_monitor',
@@ -135,38 +127,28 @@ def generate_launch_description():
         }]
     )
 
-    # [수정] 통합된 Mux Logger Node (파라미터 완전 일치)
     mux_logger_node = Node(
         package='racecar_experiments',
         executable='mux_logger', 
         name='mux_logger',
         output='screen',
         parameters=[{
-            # 1. 파일 저장 관련
             'output_dir': log_output_dir,
             'scenario_name': scenario_name_str,
             'planner_mode': planner_mode_expr,
-            
-            # 2. 도착 및 안전 판정 (C++ 기본값과 비슷하게 설정)
-            'goal_tolerance': 1.0,        # 도착 인정 범위 (m)
-            'start_safe_dist': 5.0,       # 출발 간주 거리 (m)
-            'stuck_timeout': 5.0,         # 5초간 제자리 면 종료
-            'stuck_dist_thresh': 0.2,     # Stuck 거리 기준
-            'safe_dist_threshold': 0.5    # 안전 거리 통계 기준
+            'goal_tolerance': 1.0, 
+            'start_safe_dist': 5.0, 
+            'stuck_timeout': 5.0, 
+            'stuck_dist_thresh': 0.2, 
+            'safe_dist_threshold': 0.5 
         }]
     )
 
-    # ==============================
-    # 4. Planners (Background)
-    # ==============================
-
-    # 4-1. Frenet Planner
     frenet_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([frenet_pkg, 'launch', 'frenet.launch.py'])
         )
     )
-
 
     fgm_node = Node(
         package='f1tenth_planner',
@@ -175,6 +157,7 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'base_frame': 'ego_racecar/base_link',
+            # ... (기존 파라미터 유지) ...
             'fov_angle': 183.4000,
             'speed_check_fov_deg': 25.3000,
             'gap_threshold': 0.8900,
@@ -199,11 +182,6 @@ def generate_launch_description():
         }]
     )
 
-    # ==============================
-    # 5. Mux & Main Controller
-    # ==============================
-
-    # 5-1. Mux Node
     mux_node = Node(
         package='planner_mux',
         executable='planner_mux_node',
@@ -219,7 +197,6 @@ def generate_launch_description():
         }]
     )
 
-    # 5-2. Main Pure Pursuit Node
     main_pp_node = Node(
         package='f1tenth_planner',
         executable='pure_pursuit_node',
@@ -235,11 +212,6 @@ def generate_launch_description():
         }],
     )
 
-    # ==============================
-    # 6. 종료 조건 및 순서
-    # ==============================
-
-    # [수정] 통합 로거 종료 시 전체 실험 종료
     exit_on_logger = RegisterEventHandler(
         event_handler=OnProcessExit(
             target_action=mux_logger_node,
@@ -252,7 +224,7 @@ def generate_launch_description():
         actions=[LogInfo(msg="Timeout reached."), EmitEvent(event=Shutdown())]
     )
     conditional_stop_opp = GroupAction(
-        condition=IfCondition(is_playground), # playground일 때만 실행!
+        condition=IfCondition(is_playground),
         actions=[stop_opp_cmd]
     )
 
@@ -262,15 +234,20 @@ def generate_launch_description():
 
         stop_cmd,
         conditional_stop_opp,
-        TimerAction(period=1.0, actions=[static_path_node]),
-        TimerAction(period=4.0, actions=[collision_node]),
         
-        # [수정] 통합 로거 실행
-        TimerAction(period=4.0, actions=[mux_logger_node]),
+        # [수정] 1차 위치 초기화 (1.0초)
+        TimerAction(period=1.0, actions=[static_path_node_1]),
         
-        TimerAction(period=5.0, actions=[frenet_launch, fgm_node]),
-        TimerAction(period=6.0, actions=[opponent_pp_node]),
-        TimerAction(period=6.0, actions=[mux_node, main_pp_node]),
+        # [수정] 2차 위치 초기화 (2.5초) - 확실하게 적용되도록 재실행
+        TimerAction(period=2.5, actions=[static_path_node_2]),
+
+        # 다른 노드들은 위치가 확실히 잡힌 후 (3초 이후) 실행
+        TimerAction(period=3.5, actions=[collision_node]),
+        TimerAction(period=3.5, actions=[mux_logger_node]),
+        
+        TimerAction(period=4.5, actions=[frenet_launch, fgm_node]),
+        TimerAction(period=5.5, actions=[opponent_pp_node]),
+        TimerAction(period=5.5, actions=[mux_node, main_pp_node]),
 
         exit_on_logger,
         timeout_action

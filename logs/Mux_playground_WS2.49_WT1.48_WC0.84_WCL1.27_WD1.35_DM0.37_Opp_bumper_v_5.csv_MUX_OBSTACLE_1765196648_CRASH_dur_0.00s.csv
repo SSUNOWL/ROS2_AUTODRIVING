@@ -1,0 +1,21 @@
+t,x,y,yaw,speed,yaw_rate,a_lat,planner,min_d,track_error,fre_min_d,fgm_min_d,fre_track,fgm_track,collision
+7.7506e-05,36.6267,4.34969,-0.58306,2.04122,-0.0932448,-0.190333,NONE,0,0,0,0,0,0,0
+
+--- Experiment Summary ---
+Scenario,Mux_playground_WS2.49_WT1.48_WC0.84_WCL1.27_WD1.35_DM0.37_Opp_bumper_v_5.csv
+Mode,MUX_OBSTACLE
+Finish Reason,COLLISION DETECTED
+Duration (s),0.00
+Total Dist (m),0.00
+Collision,YES
+FRENET Usage (%),0.00
+FGM Usage (%),0.00
+Max Speed (m/s),2.04
+Max Lat Acc (m/s^2),0.19
+Global Min Dist (m),0.00
+Global Unsafe Ratio,1.00
+Global Track RMS (m),0.00
+Global Lat Acc RMS,0.19
+FGM Min Dist (m),1000000000.00
+FGM Unsafe Ratio,0.00
+FGM Track RMS (m),0.00
