@@ -46,7 +46,10 @@ public:
     
     // 안전 거리 임계값 (Unsafe Time 계산용)
     safe_dist_threshold_ = declare_parameter<double>("safe_dist_threshold", 0.5);
-
+    
+    // 도착점 활성화 기준점 (출발하자마자 도착으로 인식되는 현상 방지)
+    min_travel_dist_ = declare_parameter<double>("min_travel_dist", 20.0);
+    
     // 디렉토리 생성
     if (!fs::exists(output_dir_)) {
         fs::create_directories(output_dir_);
@@ -249,7 +252,7 @@ private:
             if (std::hypot(x - start_x_, y - start_y_) > start_safe_dist_) has_left_start_ = true;
         }
         
-        if (has_left_start_) {
+        if (has_left_start_&& total_dist_ > min_travel_dist_) {
             double dist_to_goal = std::hypot(x - goal_x_, y - goal_y_);
             
             // 내적 계산: (차량위치 - 목표위치) • (목표진행방향)
@@ -409,6 +412,7 @@ private:
   double last_fre_min_d_, last_fgm_min_d_, last_fre_track_, last_fgm_track_;
 
   double min_d_min_, unsafe_time_, total_time_, sum_track_err_sq_, sum_a_lat_sq_;
+  double min_travel_dist_;
   
   // FGM 전용 멤버
   double fgm_min_d_min_, fgm_unsafe_time_, fgm_total_time_, fgm_sum_track_err_sq_;
